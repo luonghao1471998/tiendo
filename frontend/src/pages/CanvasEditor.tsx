@@ -1,0 +1,523 @@
+import { useEffect, useState } from 'react'
+import { Link, useParams } from 'react-router-dom'
+
+import client from '@/api/client'
+import CanvasToolbar from '@/components/canvas/CanvasToolbar'
+import type { CanvasDrawMode } from '@/components/canvas/CanvasToolbar'
+import CanvasWrapper from '@/components/canvas/CanvasWrapper'
+import PolygonLayer from '@/components/canvas/PolygonLayer'
+import TileLayer from '@/components/canvas/TileLayer'
+import ZoomControls from '@/components/canvas/ZoomControls'
+import { ZONE_STATUS, ZONE_STATUS_COLOR } from '@/lib/constants'
+import type { Zone, Geometry } from '@/stores/canvasStore'
+import useCanvasStore from '@/stores/canvasStore'
+import useAuthStore from '@/stores/authStore'
+
+// ─── Types ──────────────────────────────────────────────────────────────────
+
+type LayerInfo = {
+  id: number
+  name: string
+  status: 'pending' | 'processing' | 'ready' | 'error'
+  width_px: number | null
+  height_px: number | null
+}
+
+type ApiResponse<T> = { success: boolean; data: T }
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function parseApiError(err: unknown, fallback: string): string {
+  if (typeof err === 'object' && err !== null && 'response' in err) {
+    const msg = (err as { response?: { data?: { error?: { message?: unknown } } } }).response
+      ?.data?.error?.message
+    if (typeof msg === 'string' && msg) return msg
+  }
+  return fallback
+}
+
+const STATUS_LABELS: Record<string, string> = {
+  not_started: 'Chưa bắt đầu',
+  in_progress: 'Đang thi công',
+  completed: 'Hoàn thành',
+  delayed: 'Trễ',
+  paused: 'Tạm dừng',
+}
+
+// ─── ZoneCreateModal ────────────────────────────────────────────────────────
+
+function ZoneCreateModal({
+  onSave,
+  onCancel,
+  loading,
+}: {
+  onSave: (data: {
+    name: string
+    assignee: string
+    deadline: string
+    tasks: string
+    notes: string
+  }) => Promise<void>
+  onCancel: () => void
+  loading: boolean
+}) {
+  const [name, setName] = useState('')
+  const [assignee, setAssignee] = useState('')
+  const [deadline, setDeadline] = useState('')
+  const [tasks, setTasks] = useState('')
+  const [notes, setNotes] = useState('')
+  const [err, setErr] = useState<string | null>(null)
+
+  const submit = async () => {
+    if (!name.trim()) { setErr('Tên khu vực là bắt buộc.'); return }
+    setErr(null)
+    try {
+      await onSave({ name: name.trim(), assignee, deadline, tasks, notes })
+    } catch (e) {
+      setErr(parseApiError(e, 'Tạo khu vực thất bại.'))
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4">
+      <div className="w-full max-w-md rounded-xl border bg-card shadow-2xl">
+        <div className="border-b px-5 py-4">
+          <h2 className="font-semibold">Thông tin khu vực mới</h2>
+        </div>
+        <div className="space-y-3 p-5">
+          <div>
+            <label className="mb-1 block text-xs font-medium">
+              Tên khu vực <span className="text-red-500">*</span>
+            </label>
+            <input
+              autoFocus
+              className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+              placeholder="VD: Phòng 101A"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') void submit() }}
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium">Người phụ trách</label>
+            <input
+              className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+              placeholder="Tên đội/người (tuỳ chọn)"
+              value={assignee}
+              onChange={(e) => setAssignee(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium">Deadline</label>
+            <input
+              type="date"
+              className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+              value={deadline}
+              onChange={(e) => setDeadline(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium">Công việc</label>
+            <input
+              className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+              placeholder="Mô tả công việc (tuỳ chọn)"
+              value={tasks}
+              onChange={(e) => setTasks(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium">Ghi chú</label>
+            <textarea
+              className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+              rows={2}
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+            />
+          </div>
+          {err ? <p className="text-xs text-red-600">{err}</p> : null}
+        </div>
+        <div className="flex justify-end gap-2 border-t px-5 py-4">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="rounded-md border px-4 py-2 text-sm"
+          >
+            Hủy
+          </button>
+          <button
+            type="button"
+            onClick={() => void submit()}
+            disabled={loading}
+            className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground disabled:opacity-60"
+          >
+            {loading ? 'Đang lưu...' : 'Tạo khu vực'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── ZoneDetailPanel ─────────────────────────────────────────────────────────
+
+function ZoneDetailPanel({ zone, onClose }: { zone: Zone; onClose: () => void }) {
+  const { updateZone, removeZone } = useCanvasStore()
+  const [saving, setSaving] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [status, setStatus] = useState(zone.status)
+  const [pct, setPct] = useState(zone.completion_pct)
+  const [notes, setNotes] = useState(zone.notes ?? '')
+  const [deadline, setDeadline] = useState(zone.deadline ?? '')
+  const [err, setErr] = useState<string | null>(null)
+
+  const save = async () => {
+    setSaving(true); setErr(null)
+    try {
+      const resp = (await client.patch(`/zones/${zone.id}`, {
+        status, completion_pct: pct, notes, deadline: deadline || null,
+      })) as { data: ApiResponse<Zone> }
+      updateZone(resp.data.data)
+    } catch (e) {
+      setErr(parseApiError(e, 'Lưu thất bại.'))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const del = async () => {
+    if (!confirm(`Xóa khu vực "${zone.name}"?`)) return
+    setDeleting(true)
+    try {
+      await client.delete(`/zones/${zone.id}`)
+      removeZone(zone.id)
+      onClose()
+    } catch (e) {
+      setErr(parseApiError(e, 'Xóa thất bại.'))
+      setDeleting(false)
+    }
+  }
+
+  const color = ZONE_STATUS_COLOR[zone.status] ?? '#9CA3AF'
+
+  return (
+    <div className="space-y-3 p-3">
+      <div className="flex items-start justify-between">
+        <div className="min-w-0 flex-1">
+          <p className="text-xs text-muted-foreground">{zone.zone_code}</p>
+          <p className="truncate font-semibold">{zone.name}</p>
+        </div>
+        <div className="ml-2 h-3 w-3 shrink-0 rounded-full" style={{ backgroundColor: color }} />
+      </div>
+
+      <div>
+        <label className="mb-1 block text-xs font-medium">Trạng thái</label>
+        <select
+          className="w-full rounded-md border bg-background px-2 py-1.5 text-sm"
+          value={status}
+          onChange={(e) => setStatus(e.target.value as Zone['status'])}
+        >
+          {ZONE_STATUS.map((s) => (
+            <option key={s} value={s}>{STATUS_LABELS[s]}</option>
+          ))}
+        </select>
+      </div>
+
+      <div>
+        <label className="mb-1 flex justify-between text-xs font-medium">
+          <span>Tiến độ</span><span className="font-bold">{pct}%</span>
+        </label>
+        <input type="range" min={0} max={100} value={pct}
+          onChange={(e) => setPct(Number(e.target.value))} className="w-full" />
+      </div>
+
+      <div>
+        <label className="mb-1 block text-xs font-medium">Deadline</label>
+        <input type="date" className="w-full rounded-md border bg-background px-2 py-1.5 text-sm"
+          value={deadline} onChange={(e) => setDeadline(e.target.value)} />
+      </div>
+
+      <div>
+        <label className="mb-1 block text-xs font-medium">Ghi chú</label>
+        <textarea className="w-full rounded-md border bg-background px-2 py-1.5 text-sm"
+          rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
+      </div>
+
+      {err ? <p className="text-xs text-red-600">{err}</p> : null}
+
+      <div className="flex gap-2">
+        <button type="button" onClick={() => void save()} disabled={saving}
+          className="flex-1 rounded-md bg-primary py-1.5 text-sm text-primary-foreground disabled:opacity-60">
+          {saving ? 'Đang lưu...' : 'Lưu'}
+        </button>
+        <button type="button" onClick={() => void del()} disabled={deleting}
+          className="rounded-md border border-red-300 px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 disabled:opacity-60">
+          Xóa
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ─── Main page ────────────────────────────────────────────────────────────────
+
+export default function CanvasEditor() {
+  const { id: projectId, layerId } = useParams<{ id: string; layerId: string }>()
+  const { user } = useAuthStore()
+
+  const [layer, setLayer] = useState<LayerInfo | null>(null)
+  const [layerError, setLayerError] = useState<string | null>(null)
+
+  // Draw mode toolbar
+  const [drawMode, setDrawMode] = useState<CanvasDrawMode>('select')
+
+  // Pending geometry after drawing, waiting for zone name input
+  const [pendingGeometry, setPendingGeometry] = useState<Geometry | null>(null)
+  const [creatingZone, setCreatingZone] = useState(false)
+
+  const zones = useCanvasStore((s) => s.zones)
+  const selectedZoneId = useCanvasStore((s) => s.selectedZoneId)
+  const filterStatus = useCanvasStore((s) => s.filterStatus)
+  const lastSyncAt = useCanvasStore((s) => s.lastSyncAt)
+  const { fetchZonesAndMarks, syncSince, addZone, selectZone, setFilterStatus, reset } = useCanvasStore()
+
+  const layerIdNum = Number(layerId)
+  const projectIdNum = Number(projectId)
+
+  // Load layer + zones
+  useEffect(() => {
+    if (!layerIdNum) return
+    reset()
+    const load = async () => {
+      try {
+        const resp = (await client.get(`/layers/${layerIdNum}`)) as { data: ApiResponse<LayerInfo> }
+        setLayer(resp.data.data)
+      } catch (err) {
+        setLayerError(parseApiError(err, 'Không tải được layer.'))
+      }
+    }
+    void load()
+    void fetchZonesAndMarks(layerIdNum)
+  }, [layerIdNum, fetchZonesAndMarks, reset])
+
+  // Poll sync 30s
+  useEffect(() => {
+    if (!layerIdNum) return
+    const id = setInterval(() => {
+      if (lastSyncAt) void syncSince(layerIdNum, lastSyncAt)
+    }, 30_000)
+    return () => clearInterval(id)
+  }, [layerIdNum, lastSyncAt, syncSince])
+
+  // Reset draw mode when layer changes
+  useEffect(() => { setDrawMode('select') }, [layerIdNum])
+
+  // Handle zone draw completion → show modal
+  const handleDrawComplete = (geometry: Geometry) => {
+    setPendingGeometry(geometry)
+    setDrawMode('select') // switch back to select while modal is open
+  }
+
+  // Create zone via API
+  const handleZoneCreate = async (formData: {
+    name: string; assignee: string; deadline: string; tasks: string; notes: string
+  }) => {
+    if (!pendingGeometry) return
+    setCreatingZone(true)
+    try {
+      const resp = (await client.post(`/layers/${layerIdNum}/zones`, {
+        name: formData.name,
+        geometry_pct: pendingGeometry,
+        assignee: formData.assignee || null,
+        deadline: formData.deadline || null,
+        tasks: formData.tasks || null,
+        notes: formData.notes || null,
+      })) as { data: ApiResponse<Zone> }
+      addZone(resp.data.data)
+      setPendingGeometry(null)
+    } finally {
+      setCreatingZone(false)
+    }
+  }
+
+  const selectedZone = selectedZoneId != null ? zones.find((z) => z.id === selectedZoneId) : null
+  const visibleZones = filterStatus ? zones.filter((z) => z.status === filterStatus) : zones
+
+  const layerReady = layer?.status === 'ready'
+  const widthPx = layer?.width_px ?? 2480
+  const heightPx = layer?.height_px ?? 3508
+
+  if (layerError) {
+    return (
+      <div className="flex h-full items-center justify-center">
+        <p className="text-red-600">{layerError}</p>
+      </div>
+    )
+  }
+
+  return (
+    <>
+      {/* Zone create modal */}
+      {pendingGeometry ? (
+        <ZoneCreateModal
+          onSave={handleZoneCreate}
+          onCancel={() => setPendingGeometry(null)}
+          loading={creatingZone}
+        />
+      ) : null}
+
+      <div
+        style={{ height: 'calc(100vh - 65px)', display: 'flex', flexDirection: 'column' }}
+        className="overflow-hidden"
+      >
+        {/* Context bar */}
+        <div className="flex items-center gap-3 border-b bg-card px-4 py-2 text-sm">
+          <Link to={`/projects/${projectIdNum}`} className="text-muted-foreground hover:underline">
+            ← Dự án
+          </Link>
+          <span className="text-muted-foreground">/</span>
+          <span className="font-medium">{layer?.name ?? `Layer #${layerIdNum}`}</span>
+          {!layerReady && layer ? (
+            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-700">
+              {layer.status === 'processing' ? 'Đang xử lý...' : layer.status}
+            </span>
+          ) : null}
+          <span className="ml-auto text-xs text-muted-foreground">
+            {zones.length} khu vực
+          </span>
+        </div>
+
+        {/* Main area */}
+        <div className="flex flex-1 overflow-hidden">
+          {/* Canvas area */}
+          <div className="relative flex-1 overflow-hidden">
+            {layerReady ? (
+              <CanvasWrapper widthPx={widthPx} heightPx={heightPx}>
+                <TileLayer layerId={layerIdNum} widthPx={widthPx} heightPx={heightPx} />
+                <PolygonLayer
+                  widthPx={widthPx}
+                  heightPx={heightPx}
+                  canvasMode="editor"
+                  currentUserId={user?.id}
+                  drawMode={drawMode !== 'select'}
+                  drawShape={drawMode === 'draw_rect' ? 'rect' : 'polygon'}
+                  onDrawComplete={handleDrawComplete}
+                />
+              </CanvasWrapper>
+            ) : (
+              <div className="flex h-full items-center justify-center bg-neutral-800 text-neutral-400">
+                {layer?.status === 'processing'
+                  ? 'Đang xử lý bản vẽ...'
+                  : layer
+                    ? `Layer chưa sẵn sàng (${layer.status})`
+                    : 'Đang tải...'}
+              </div>
+            )}
+
+            {/* Draw toolbar — top-left */}
+            <div className="absolute left-4 top-4 z-10">
+              <CanvasToolbar mode={drawMode} onModeChange={setDrawMode} />
+            </div>
+
+            {/* Hint when in draw mode */}
+            {drawMode !== 'select' ? (
+              <div className="absolute left-1/2 top-4 z-10 -translate-x-1/2 rounded-lg border bg-background/90 px-4 py-2 text-xs shadow backdrop-blur-sm">
+                {drawMode === 'draw_polygon'
+                  ? 'Click để đặt điểm • Double-click để kết thúc (min 3 điểm)'
+                  : 'Click và kéo để vẽ hình chữ nhật'}
+              </div>
+            ) : null}
+
+            {/* Filter chips — bottom row above ZoomControls */}
+            <div className="absolute bottom-16 left-4 z-10 flex flex-wrap gap-1">
+              <button
+                type="button"
+                onClick={() => setFilterStatus(null)}
+                className={`rounded-full border px-2.5 py-0.5 text-xs font-medium backdrop-blur-sm ${
+                  !filterStatus ? 'bg-foreground text-background' : 'bg-background/80 hover:bg-background'
+                }`}
+              >
+                Tất cả
+              </button>
+              {ZONE_STATUS.map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  style={filterStatus === s ? { backgroundColor: ZONE_STATUS_COLOR[s], color: '#fff', borderColor: ZONE_STATUS_COLOR[s] } : {}}
+                  className={`rounded-full border px-2.5 py-0.5 text-xs font-medium backdrop-blur-sm ${
+                    filterStatus === s ? '' : 'bg-background/80 hover:bg-background'
+                  }`}
+                  onClick={() => setFilterStatus(filterStatus === s ? null : s)}
+                >
+                  {STATUS_LABELS[s]}
+                </button>
+              ))}
+            </div>
+
+            {/* ZoomControls */}
+            <div className="absolute bottom-4 left-4 z-10">
+              <ZoomControls />
+            </div>
+
+            {/* Legend */}
+            <div className="absolute bottom-4 right-4 z-10 flex flex-col gap-1 rounded-lg border bg-background/90 p-2 backdrop-blur-sm text-xs">
+              {ZONE_STATUS.map((s) => (
+                <div key={s} className="flex items-center gap-2">
+                  <span className="h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: ZONE_STATUS_COLOR[s] }} />
+                  {STATUS_LABELS[s]}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Sidebar */}
+          <aside className="flex w-80 flex-col border-l bg-card">
+            <div className="border-b px-4 py-3">
+              <p className="font-semibold">Khu vực</p>
+              <p className="text-sm text-muted-foreground">
+                {visibleZones.length}/{zones.length} khu vực
+              </p>
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              {visibleZones.length === 0 ? (
+                <div className="p-4 text-center text-sm text-muted-foreground">
+                  {zones.length === 0
+                    ? 'Chưa có khu vực. Dùng toolbar ở góc trên trái để vẽ zone.'
+                    : 'Không có zone phù hợp với bộ lọc.'}
+                </div>
+              ) : (
+                <ul>
+                  {visibleZones.map((zone) => {
+                    const color = ZONE_STATUS_COLOR[zone.status] ?? '#9CA3AF'
+                    const isSelected = zone.id === selectedZoneId
+                    return (
+                      <li key={zone.id}>
+                        <button
+                          type="button"
+                          className={`flex w-full items-center gap-2.5 border-b px-4 py-2 text-left text-sm hover:bg-muted/40 ${
+                            isSelected ? 'bg-primary/10 font-medium' : ''
+                          }`}
+                          onClick={() => selectZone(isSelected ? null : zone.id)}
+                        >
+                          <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: color }} />
+                          <span className="flex-1 truncate">{zone.name}</span>
+                          <span className="text-xs text-muted-foreground">{zone.completion_pct}%</span>
+                        </button>
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
+            </div>
+
+            {selectedZone ? (
+              <div className="border-t">
+                <ZoneDetailPanel zone={selectedZone} onClose={() => selectZone(null)} />
+              </div>
+            ) : null}
+          </aside>
+        </div>
+      </div>
+    </>
+  )
+}
