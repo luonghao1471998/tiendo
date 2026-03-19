@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\LayerController;
 use App\Http\Controllers\Api\MasterLayerController;
 use App\Http\Controllers\Api\ProjectController;
 use Illuminate\Support\Facades\Route;
@@ -32,5 +33,11 @@ Route::prefix('v1')->group(function (): void {
         Route::post('/projects/{project}/master-layers', [MasterLayerController::class, 'store']);
         Route::put('/master-layers/{masterLayer}', [MasterLayerController::class, 'update']);
         Route::delete('/master-layers/{masterLayer}', [MasterLayerController::class, 'destroy']);
+
+        Route::post('/master-layers/{masterLayer}/layers', [LayerController::class, 'store']);
+        Route::get('/layers/{layer}', [LayerController::class, 'show']);
+        Route::post('/layers/{layer}/retry', [LayerController::class, 'retry']);
+        Route::delete('/layers/{layer}', [LayerController::class, 'destroy']);
+        Route::get('/layers/{layer}/tiles/{z}/{x}/{y}', [LayerController::class, 'tile']);
     });
 });

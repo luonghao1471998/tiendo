@@ -6,6 +6,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class MasterLayer extends Model
 {
@@ -29,4 +30,10 @@ class MasterLayer extends Model
     {
         return $this->belongsTo(Project::class);
     }
+
+    public function layers(): HasMany
+    {
+        return $this->hasMany(Layer::class);
+    }
 }
+
