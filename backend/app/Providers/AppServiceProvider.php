@@ -13,6 +13,10 @@ class AppServiceProvider extends ServiceProvider
         Gate::policy(\App\Models\Project::class, \App\Policies\ProjectPolicy::class);
         Gate::policy(\App\Models\MasterLayer::class, \App\Policies\MasterLayerPolicy::class);
         Gate::policy(\App\Models\Layer::class, \App\Policies\LayerPolicy::class);
+        Gate::policy(\App\Models\Zone::class, \App\Policies\ZonePolicy::class);
+        Gate::policy(\App\Models\Mark::class, \App\Policies\MarkPolicy::class);
+        Gate::policy(\App\Models\ZoneComment::class, \App\Policies\ZoneCommentPolicy::class);
+        Gate::policy(\App\Models\ActivityLog::class, \App\Policies\ActivityLogPolicy::class);
 
         // Layer upload dùng MasterLayer làm argument
         Gate::define('upload', function ($user, $model) {

@@ -6,10 +6,12 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreLayerRequest;
+use App\Http\Requests\SyncLayerRequest;
 use App\Http\Resources\LayerResource;
 use App\Models\Layer;
 use App\Models\MasterLayer;
 use App\Services\LayerService;
+use App\Services\LayerSyncService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -20,8 +22,10 @@ use Symfony\Component\HttpFoundation\BinaryFileResponse;
  */
 class LayerController extends Controller
 {
-    public function __construct(private readonly LayerService $layerService)
-    {
+    public function __construct(
+        private readonly LayerService $layerService,
+        private readonly LayerSyncService $layerSyncService,
+    ) {
     }
 
     /**
@@ -96,6 +100,24 @@ class LayerController extends Controller
         return response()->json([
             'success' => true,
             'data' => (object) [],
+        ]);
+    }
+
+    /**
+     * GET /api/v1/layers/{layer}/sync?since=ISO8601
+     */
+    public function sync(SyncLayerRequest $request, Layer $layer): JsonResponse
+    {
+        $this->authorize('sync', $layer);
+
+        $payload = $this->layerSyncService->buildSyncPayload(
+            $layer,
+            (string) $request->validated('since')
+        );
+
+        return response()->json([
+            'success' => true,
+            'data' => $payload,
         ]);
     }
 

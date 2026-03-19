@@ -21,12 +21,22 @@ class LayerPolicy
         return $this->viewsProject($user, $layer->masterLayer->project);
     }
 
+    public function sync(User $user, Layer $layer): bool
+    {
+        return $this->view($user, $layer);
+    }
+
     public function retry(User $user, Layer $layer): bool
     {
         return $this->managesProject($user, $layer->masterLayer->project);
     }
 
     public function delete(User $user, Layer $layer): bool
+    {
+        return $this->managesProject($user, $layer->masterLayer->project);
+    }
+
+    public function import(User $user, Layer $layer): bool
     {
         return $this->managesProject($user, $layer->masterLayer->project);
     }

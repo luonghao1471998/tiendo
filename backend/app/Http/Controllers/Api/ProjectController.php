@@ -9,6 +9,7 @@ use App\Http\Requests\StoreProjectRequest;
 use App\Http\Requests\UpdateProjectRequest;
 use App\Http\Resources\ProjectResource;
 use App\Models\Project;
+use App\Services\ProjectDashboardService;
 use App\Services\ProjectService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -18,8 +19,10 @@ use Illuminate\Http\Request;
  */
 class ProjectController extends Controller
 {
-    public function __construct(private readonly ProjectService $projectService)
-    {
+    public function __construct(
+        private readonly ProjectService $projectService,
+        private readonly ProjectDashboardService $projectDashboardService
+    ) {
     }
 
     /**
@@ -69,6 +72,7 @@ class ProjectController extends Controller
     public function show(Request $request, Project $project): JsonResponse
     {
         $this->authorize('view', $project);
+        $project->setAttribute('stats_summary', $this->projectDashboardService->getStatsSummary($project));
 
         return response()->json([
             'success' => true,

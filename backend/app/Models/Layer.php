@@ -6,6 +6,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 class Layer extends Model
 {
     protected $fillable = [
@@ -51,6 +52,11 @@ class Layer extends Model
     public function uploadedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'uploaded_by');
+    }
+
+    public function zones(): HasMany
+    {
+        return $this->hasMany(Zone::class);
     }
 }
 
