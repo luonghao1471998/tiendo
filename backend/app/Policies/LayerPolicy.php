@@ -33,30 +33,21 @@ class LayerPolicy
 
     private function viewsProject(User $user, Project $project): bool
     {
-        if (($user->is_active ?? true) !== true) {
-            return false;
-        }
-
-        if (($user->role ?? null) === 'admin') {
-            return true;
-        }
-
-        return $project->members()->where('user_id', $user->id)->exists();
+        if (!$user->is_active) return false;
+        if ($user->role === 'admin') return true;
+        return $project->relationLoaded('members')
+            ? $project->members->contains('user_id', $user->id)
+            : $project->members()->where('user_id', $user->id)->exists();
     }
 
     private function managesProject(User $user, Project $project): bool
     {
-        if (($user->is_active ?? true) !== true) {
-            return false;
-        }
-
-        if (($user->role ?? null) === 'admin') {
-            return true;
-        }
-
-        return $project->members()
-            ->where('user_id', $user->id)
-            ->where('role', 'project_manager')
-            ->exists();
+        if (!$user->is_active) return false;
+        if ($user->role === 'admin') return true;
+        return $project->relationLoaded('members')
+            ? $project->members->where('user_id', $user->id)
+                ->where('role', 'project_manager')->isNotEmpty()
+            : $project->members()->where('user_id', $user->id)
+                ->where('role', 'project_manager')->exists();
     }
 }

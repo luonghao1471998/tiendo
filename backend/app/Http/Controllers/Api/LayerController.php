@@ -29,7 +29,7 @@ class LayerController extends Controller
      */
     public function store(StoreLayerRequest $request, MasterLayer $masterLayer): JsonResponse
     {
-        $this->authorize('uploadLayer', $masterLayer);
+        $this->authorize('upload', $masterLayer);
 
         /** @var \App\Models\User $user */
         $user = $request->user();

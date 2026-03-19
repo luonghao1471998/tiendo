@@ -1,40 +1,25 @@
 <?php
-
 namespace App\Providers;
 
-use App\Models\MasterLayer;
-use App\Models\Project;
-use App\Models\User;
-use App\Policies\LayerPolicy;
-use App\Policies\MasterLayerPolicy;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
 {
-    /**
-     * Register any application services.
-     */
-    public function register(): void
-    {
-        //
-    }
+    public function register(): void {}
 
-    /**
-     * Bootstrap any application services.
-     */
     public function boot(): void
     {
-        Gate::define('viewMasterLayers', function (User $user, Project $project) {
-            return app(MasterLayerPolicy::class)->viewList($user, $project);
-        });
+        Gate::policy(\App\Models\Project::class, \App\Policies\ProjectPolicy::class);
+        Gate::policy(\App\Models\MasterLayer::class, \App\Policies\MasterLayerPolicy::class);
+        Gate::policy(\App\Models\Layer::class, \App\Policies\LayerPolicy::class);
 
-        Gate::define('manageMasterLayers', function (User $user, Project $project) {
-            return app(MasterLayerPolicy::class)->manage($user, $project);
-        });
-
-        Gate::define('uploadLayer', function (User $user, MasterLayer $masterLayer) {
-            return app(LayerPolicy::class)->upload($user, $masterLayer);
+        // Layer upload dùng MasterLayer làm argument
+        Gate::define('upload', function ($user, $model) {
+            if ($model instanceof \App\Models\MasterLayer) {
+                return app(\App\Policies\LayerPolicy::class)->upload($user, $model);
+            }
+            return false;
         });
     }
 }

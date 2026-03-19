@@ -27,7 +27,7 @@ class AuthService
             ]);
         }
 
-        $minutes = (int) (env('SANCTUM_TOKEN_EXPIRATION', 10080) ?: 10080);
+        $minutes = (int) (config('sanctum.expiration', 10080) ?: 10080);
         $expiresAt = now()->addMinutes($minutes);
 
         $token = $user->createToken('api', ['*'], $expiresAt);

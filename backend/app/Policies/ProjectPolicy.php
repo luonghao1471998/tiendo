@@ -20,7 +20,9 @@ class ProjectPolicy
             return true;
         }
 
-        return $project->members()->where('user_id', $user->id)->exists();
+        return $project->relationLoaded('members')
+        ? $project->members->contains('user_id', $user->id)
+        : $project->members()->where('user_id', $user->id)->exists();
     }
 
     public function create(User $user): bool

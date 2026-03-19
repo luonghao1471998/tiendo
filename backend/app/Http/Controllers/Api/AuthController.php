@@ -40,7 +40,7 @@ class AuthController extends Controller
                     'role' => $user->role ?? null,
                 ],
             ],
-        ], 201);
+        ], 200);
     }
 
     /**
