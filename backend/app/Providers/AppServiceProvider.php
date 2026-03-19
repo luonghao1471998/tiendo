@@ -2,6 +2,10 @@
 
 namespace App\Providers;
 
+use App\Models\Project;
+use App\Models\User;
+use App\Policies\MasterLayerPolicy;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -19,6 +23,12 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        //
+        Gate::define('viewMasterLayers', function (User $user, Project $project) {
+            return app(MasterLayerPolicy::class)->viewList($user, $project);
+        });
+
+        Gate::define('manageMasterLayers', function (User $user, Project $project) {
+            return app(MasterLayerPolicy::class)->manage($user, $project);
+        });
     }
 }

@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\MasterLayerController;
 use App\Http\Controllers\Api\ProjectController;
 use Illuminate\Support\Facades\Route;
 
@@ -25,5 +26,11 @@ Route::prefix('v1')->group(function (): void {
         Route::get('/projects/{project}', [ProjectController::class, 'show']);
         Route::put('/projects/{project}', [ProjectController::class, 'update']);
         Route::delete('/projects/{project}', [ProjectController::class, 'destroy']);
+
+        // Master layers (nested + flat)
+        Route::get('/projects/{project}/master-layers', [MasterLayerController::class, 'index']);
+        Route::post('/projects/{project}/master-layers', [MasterLayerController::class, 'store']);
+        Route::put('/master-layers/{masterLayer}', [MasterLayerController::class, 'update']);
+        Route::delete('/master-layers/{masterLayer}', [MasterLayerController::class, 'destroy']);
     });
 });
