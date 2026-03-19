@@ -6,9 +6,23 @@ namespace App\Repositories;
 
 use App\Models\Layer;
 use App\Models\MasterLayer;
+use Illuminate\Database\Eloquent\Collection;
 
 class LayerRepository
 {
+    /**
+     * @return Collection<int, Layer>
+     */
+    public function listForMasterLayer(MasterLayer $masterLayer): Collection
+    {
+        return Layer::query()
+            ->where('master_layer_id', $masterLayer->id)
+            ->withCount('zones')
+            ->orderBy('sort_order')
+            ->orderBy('id')
+            ->get();
+    }
+
     public function findById(int $id): ?Layer
     {
         return Layer::query()->find($id);

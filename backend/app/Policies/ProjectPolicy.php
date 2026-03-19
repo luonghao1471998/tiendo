@@ -90,4 +90,20 @@ class ProjectPolicy
     {
         return $this->invite($user, $project);
     }
+
+    /**
+     * Xem danh sách master layers trong project.
+     */
+    public function viewMasterLayers(User $user, Project $project): bool
+    {
+        return $this->view($user, $project);
+    }
+
+    /**
+     * Quản lý master layers trong project.
+     */
+    public function manageMasterLayers(User $user, Project $project): bool
+    {
+        return $this->invite($user, $project);
+    }
 }

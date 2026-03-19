@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\AnalyticsController;
 use App\Http\Controllers\Api\ActivityLogController;
 use App\Http\Controllers\Api\ExcelImportController;
+use App\Http\Controllers\Api\HealthController;
 use App\Http\Controllers\Api\LayerController;
 use App\Http\Controllers\Api\ShareLinkController;
 use App\Http\Controllers\Api\MarkController;
@@ -11,6 +12,7 @@ use App\Http\Controllers\Api\MasterLayerController;
 use App\Http\Controllers\Api\NotificationController;
 use App\Http\Controllers\Api\ProjectController;
 use App\Http\Controllers\Api\ProjectMemberController;
+use App\Http\Controllers\Api\UserController;
 use App\Http\Controllers\Api\ExportController;
 use App\Http\Controllers\Api\ZoneController;
 use App\Http\Controllers\Api\ZoneCommentController;
@@ -26,6 +28,7 @@ use Illuminate\Support\Facades\Route;
 Route::prefix('v1')->group(function (): void {
     // Auth (public)
     Route::post('/auth/login', [AuthController::class, 'login']);
+    Route::get('/health', [HealthController::class, 'show']);
 
     // Share link public endpoint — không cần auth
     Route::get('/share/{token}', [ShareLinkController::class, 'resolve']);
@@ -33,6 +36,8 @@ Route::prefix('v1')->group(function (): void {
     Route::middleware('auth:sanctum')->group(function (): void {
         Route::post('/auth/logout', [AuthController::class, 'logout']);
         Route::get('/auth/me', [AuthController::class, 'me']);
+        Route::get('/users', [UserController::class, 'index']);
+        Route::put('/users/{user}', [UserController::class, 'update']);
         Route::post('/analytics/events', [AnalyticsController::class, 'store']);
         Route::get('/notifications', [NotificationController::class, 'index']);
         Route::get('/notifications/unread-count', [NotificationController::class, 'unreadCount']);
@@ -61,6 +66,7 @@ Route::prefix('v1')->group(function (): void {
         Route::delete('/master-layers/{masterLayer}', [MasterLayerController::class, 'destroy']);
 
         Route::post('/master-layers/{masterLayer}/layers', [LayerController::class, 'store']);
+        Route::get('/master-layers/{masterLayer}/layers', [LayerController::class, 'index']);
         Route::get('/layers/{layer}', [LayerController::class, 'show']);
         Route::get('/layers/{layer}/export/excel', [ExportController::class, 'exportLayerExcel']);
         Route::post('/layers/{layer}/import', [ExcelImportController::class, 'upload']);

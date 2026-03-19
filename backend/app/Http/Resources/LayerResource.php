@@ -31,6 +31,7 @@ class LayerResource extends JsonResource
             'error_message' => $this->error_message,
             'processed_at' => $this->processed_at?->toIso8601String(),
             'next_zone_seq' => $this->next_zone_seq,
+            'zones_count' => (int) ($this->zones_count ?? 0),
             'uploaded_by' => $this->uploaded_by,
             'created_at' => $this->created_at?->toIso8601String(),
             'updated_at' => $this->updated_at?->toIso8601String(),

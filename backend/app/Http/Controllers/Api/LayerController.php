@@ -29,6 +29,21 @@ class LayerController extends Controller
     }
 
     /**
+     * GET /api/v1/master-layers/{masterLayer}/layers
+     */
+    public function index(Request $request, MasterLayer $masterLayer): JsonResponse
+    {
+        $this->authorize('viewMasterLayers', $masterLayer->project);
+
+        $layers = $this->layerService->listForMasterLayer($masterLayer);
+
+        return response()->json([
+            'success' => true,
+            'data' => LayerResource::collection($layers),
+        ]);
+    }
+
+    /**
      * POST /api/v1/master-layers/{masterLayer}/layers
      */
     public function store(StoreLayerRequest $request, MasterLayer $masterLayer): JsonResponse

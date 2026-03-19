@@ -11,6 +11,7 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         Gate::policy(\App\Models\Project::class, \App\Policies\ProjectPolicy::class);
+        Gate::policy(\App\Models\User::class, \App\Policies\UserPolicy::class);
         Gate::policy(\App\Models\MasterLayer::class, \App\Policies\MasterLayerPolicy::class);
         Gate::policy(\App\Models\Layer::class, \App\Policies\LayerPolicy::class);
         Gate::policy(\App\Models\Zone::class, \App\Policies\ZonePolicy::class);

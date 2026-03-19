@@ -65,6 +65,14 @@ class LayerService
     }
 
     /**
+     * @return \Illuminate\Database\Eloquent\Collection<int, Layer>
+     */
+    public function listForMasterLayer(MasterLayer $masterLayer)
+    {
+        return $this->layerRepository->listForMasterLayer($masterLayer);
+    }
+
+    /**
      * Dữ liệu tối thiểu cho client polling (sync layer / canvas).
      *
      * @return array<string, mixed>
