@@ -5,6 +5,143 @@
 
 ---
 
+### Session: E2E Test Fix — Sprint 1 Deliverable
+
+**Bugs phát hiện & fix (theo thứ tự):**
+
+1. **`ProjectList.tsx` thiếu nút "Tạo dự án" cho admin**
+   - File: `frontend/src/pages/ProjectList.tsx`
+   - Root cause: component chưa implement button và modal.
+   - Fix: Thêm `isAdmin = user?.role === 'admin'`, button hiện khi `isAdmin`, `CreateProjectModal` với form `name/code/description/address` → `POST /api/v1/projects` → `onCreated` callback append vào list.
+
+2. **Backend đang chạy là partial root app, không phải backend đầy đủ**
+   - Root cause: Toàn bộ Sprint 2+3 backend code nằm trong `/var/www/tiendo/backend/` (riêng), nhưng `start-wsl.sh` chạy Laravel từ root `/var/www/tiendo/` (chỉ có Auth + Project cơ bản, không có Jobs dir, không có ProcessPdfJob).
+   - Fix: Cập nhật `start-wsl.sh` để `cd "$BACKEND_DIR"` (`./backend/`) trước khi chạy mọi lệnh artisan. Thêm `BACKEND_DIR="$SCRIPT_DIR/backend"` variable.
+   - Fix: Thêm `ADMIN_PASSWORD=Admin@2026` vào `backend/.env`. Tạo admin user trực tiếp qua tinker (AdminUserSeeder trong backend rỗng).
+   - Fix: `migrate:fresh` trong backend → 19/19 migrations DONE.
+
+3. **`geometry_pct` format mismatch frontend vs backend**
+   - Frontend: `Geometry.points: [number, number][]` (array tuple)
+   - Backend expects: `geometry_pct.points: [{x, y}]` (object array)
+   - Backend only accepts `type: 'polygon'` (không có `rect`)
+   - Fix `CanvasEditor.tsx`: thêm `toApiGeometry()` helper — convert `rect` → polygon 4 điểm, convert `[x,y]` → `{x,y}` trước khi POST /zones.
+   - Fix `canvasStore.ts`: thêm `normalizeGeometry()` + `normalizeZone()` + `normalizeMark()` — khi nhận data từ API convert `{x,y}` → `[x,y]` để PolygonLayer render đúng. Apply trong `fetchZonesAndMarks`, `syncSince`, `addZone`, `updateZone`.
+
+4. **TileLayer URL format sai**
+   - Frontend dùng: `/api/v1/layers/{id}/tiles/0_x_y.jpg` (underscore + .jpg)
+   - Backend route: `/api/v1/layers/{layer}/tiles/{z}/{x}/{y}` (slash-separated, backend tự ghép filename)
+   - Fix: `TileLayer.tsx` đổi URL sang `/api/v1/layers/${layerId}/tiles/0/${x}/${y}`.
+
+5. **Tile endpoint 401 vì `<img>` tag không gửi Bearer token**
+   - Root cause: tile route nằm trong `auth:sanctum` middleware.
+   - Fix backend `routes/api.php`: chuyển tile route ra ngoài auth group (public route, không cần token).
+   - Fix `LayerController@tile`: bỏ `$this->authorize('view', $layer)`.
+
+6. **PDF file `layers/1/original.pdf` không tồn tại khi ProcessPdfJob chạy**
+   - Root cause: Upload đầu tiên qua root app, sau đó root app không có `Storage::disk('local')` trỏ đúng → file bị mất. Khi chuyển sang backend, layer cũ không có PDF.
+   - Fix: Xóa layer cũ, upload lại PDF qua backend đúng.
+
+7. **`PATCH /zones/{id}/status` không nhận `completion_pct`, `notes`, `deadline`**
+   - Root cause: `TransitionZoneStatusRequest` chỉ validate `status` + `note`.
+   - Fix backend: Thêm `completion_pct`, `notes`, `deadline` vào `TransitionZoneStatusRequest.rules()`. Cập nhật `ZoneController::status()` để pass các field mới. Cập nhật `ZoneService::transitionStatus()` signature + logic.
+   - Fix frontend `CanvasEditor.tsx` `ZoneDetailPanel.save()`: khi `status === zone.status` (không đổi) → dùng `PUT /zones/{id}` thay `PATCH /status` (tránh INVALID_STATE_TRANSITION).
+
+---
+
+**Files changed (session này):**
+
+| File | Thay đổi |
+|---|---|
+| `frontend/src/pages/ProjectList.tsx` | **rewrite** — thêm `isAdmin` guard, `CreateProjectModal` full (POST /projects) |
+| `frontend/src/stores/canvasStore.ts` | + `normalizeGeometry/normalizeZone/normalizeMark` — convert API `{x,y}` → `[x,y]` tại tất cả entry points |
+| `frontend/src/pages/CanvasEditor.tsx` | + `toApiGeometry()` (rect→polygon + [x,y]→{x,y}), fix `save()` — dùng PUT khi status không đổi |
+| `frontend/src/components/canvas/TileLayer.tsx` | URL `/tiles/0_x_y.jpg` → `/tiles/0/x/y` |
+| `backend/routes/api.php` | Tile route chuyển ra ngoài auth group (public) |
+| `backend/app/Http/Controllers/Api/LayerController.php` | `tile()` bỏ authorize |
+| `backend/app/Http/Requests/TransitionZoneStatusRequest.php` | + `completion_pct`, `notes`, `deadline` |
+| `backend/app/Http/Controllers/Api/ZoneController.php` | Pass `completion_pct`/`notes`/`deadline` vào service |
+| `backend/app/Services/ZoneService.php` | `transitionStatus()` nhận + apply `completion_pct`, `notes`, `deadline` |
+| `backend/.env` | + `ADMIN_PASSWORD=Admin@2026` |
+| `start-wsl.sh` | **rewrite** — `BACKEND_DIR=./backend`, tất cả artisan chạy từ `backend/`, admin seed bằng tinker |
+
+---
+
+**Decisions quan trọng:**
+
+- **`normalizeGeometry` ở store level, không phải PolygonLayer**: Đảm bảo data luôn nhất quán trong store. Mọi consumer (PolygonLayer, CanvasProgress, ZoneDetailPanel) đều nhận `[x,y][]` đúng format.
+- **`toApiGeometry` ở CanvasEditor**: Chỉ convert khi gửi lên API. Internal store luôn dùng `[x,y][]` để không break PolygonLayer render.
+- **Tile route public**: Tile images cần load trong `<img>` tag (không thể gửi Bearer). Tiles không chứa sensitive data (chỉ là ảnh bản vẽ) → OK để public.
+- **PUT khi status không đổi**: Tách rõ 2 use cases — state transition (PATCH /status) vs field update (PUT /zones/{id}). Tránh lỗi INVALID_STATE_TRANSITION khi user chỉ muốn sửa notes/pct.
+
+**Fails đã xử lý:**
+
+- Phát hiện backend root có `app/Jobs/` directory missing → ProcessPdfJob class not found → incomplete class serialization error trong queue. Root cause: toàn bộ backend Sprint 2+3 nằm trong `./backend/` subdirectory.
+- PDF test 328 bytes (minimal PDF) bị reject bởi pdf_processor.py (empty content) → tạo PDF có content thực sự mới xử lý được.
+- Tiles được generate vào `storage/app/private/layers/` nhưng tile controller dùng `Storage::disk('local')->path()` trả đúng `private/` path → hoạt động.
+
+**Tool kia cần biết:**
+
+- **Backend thực tế**: `/var/www/tiendo/backend/` — toàn bộ Sprint 1+2+3. Root `/var/www/tiendo/` chỉ có Auth + Project cơ bản (reference implementation).
+- **start-wsl.sh đã fix**: Chạy artisan từ `./backend/`, tự seed admin bằng tinker.
+- **Tile URL**: `/api/v1/layers/{id}/tiles/{z}/{x}/{y}` — public route, không cần Bearer.
+- **geometry_pct format**: Backend lưu và trả `{type: "polygon", points: [{x,y}]}`. Frontend normalize sang `[x,y][]` khi nhận. Frontend convert ngược `{x,y}` khi gửi.
+- **Zone status vs field update**: PATCH /status khi đổi status, PUT /zones/{id} khi chỉ update pct/notes/deadline.
+
+---
+
+### Session: WSL Dev Environment Setup + Migration Fix
+
+**Tasks hoàn thành (theo thứ tự):**
+
+1. **Tạo `start-wsl.sh`** — Script khởi động toàn bộ hệ thống trên WSL: start PostgreSQL (sudo), kiểm tra/tạo DB nếu chưa có, chạy `migrate`, `storage:link`, khởi động queue worker (nohup + pid file) và `php artisan serve` port 8000. Hỗ trợ mode `stop` để kill tất cả process theo pid file.
+
+2. **Thêm Vite proxy** vào `frontend/vite.config.ts` — `/api/*` và `/storage/*` forward sang `http://localhost:8000` để frontend dev server (port 5173) gọi được API Laravel mà không bị CORS, không cần Nginx trong dev.
+
+3. **Fix migration trùng lặp** — Phát hiện 2 bộ migration song song: `2026_03_19_1000xx` (cũ, 13 files) và `2026_03_19_1200xx` (mới hơn, 13 files). Bộ mới khác biệt quan trọng: `code` có `.unique()` trực tiếp thay `$table->unique('code')`, FK `created_by` có `.constrained('users')` rõ ràng, thêm `index('created_by')`. Xóa bộ cũ `1000xx`, giữ lại bộ `1200xx`.
+
+4. **Fix `personal_access_tokens` duplicate table** — Bảng đã tồn tại trong DB (từ lần chạy migration cũ) nhưng migration table không ghi nhận → `migrate --force` fail 42P07. Thử `tinker` insert record vào `migrations` table thủ công nhưng sau đó các bảng khác cũng gặp cùng vấn đề. Giải pháp cuối: `migrate:fresh --force` — drop toàn bộ + recreate sạch → **17/17 migration DONE**.
+
+5. **Thêm `ADMIN_PASSWORD=Admin@2026` vào `.env`** + re-seed `AdminUserSeeder` → admin user sẵn sàng với password chuẩn.
+
+6. **Verify end-to-end**: `curl POST /api/v1/auth/login` trả token → API hoạt động. `npm run dev` (Vite 8.0) ready tại port 5173.
+
+---
+
+**Files changed (session này):**
+
+| File | Thay đổi |
+|---|---|
+| `start-wsl.sh` | **new** — WSL dev startup script (PostgreSQL + migrate + queue + serve + pid management) |
+| `frontend/vite.config.ts` | + `server.proxy` cho `/api` và `/storage` → `http://localhost:8000` |
+| `database/migrations/2026_03_19_1000{01..13}_*.php` | **deleted** — bộ migration cũ trùng lặp |
+| `.env` | + `ADMIN_PASSWORD=Admin@2026` |
+
+---
+
+**Decisions quan trọng:**
+
+- **Chọn `php artisan serve` thay Nginx**: WSL dev không cần Nginx (chưa cài). `artisan serve` đủ cho dev + Vite proxy xử lý CORS. Nginx chỉ cần khi deploy VPS thật.
+- **Giữ bộ `1200xx` thay `1000xx`**: Bộ mới có schema chuẩn hơn (unique inline, FK explicit). Nếu giữ bộ cũ sẽ phải patch schema sau.
+- **`migrate:fresh` thay manual fix**: Thử mark migration bằng tinker nhưng sau đó các bảng kế tiếp cũng bị conflict. `migrate:fresh` sạch hơn, không có data thật cần bảo vệ.
+- **Pid file trong `.dev-pids/`**: Lưu pid để `stop` mode có thể kill chính xác process mà không dùng `pkill` (có thể kill nhầm process khác cùng tên).
+
+**Fails đã xử lý:**
+
+- `sudo service postgresql start` fail trong script vì shell tool không có TTY → không thể dùng heredoc sudo. Script vẫn cần user gõ password thủ công trong terminal WSL (expected behavior).
+- `pg_ctlcluster 14 main start` fail: `must run as cluster owner (postgres) or root` → không dùng được, quay về `sudo service postgresql start`.
+- `php artisan tinker --execute` insert migration record → chạy được nhưng không đủ: bảng `projects` cũng đã tồn tại từ lần run cũ → chọn `migrate:fresh`.
+- Login test với `Admin@2026` fail (Invalid credentials) vì seeder dùng `env('ADMIN_PASSWORD')` không có trong `.env` → fallback `'admin'`. Fix bằng cách thêm `ADMIN_PASSWORD` vào `.env` và re-seed.
+
+**Tool kia cần biết:**
+
+- **WSL dev flow**: (1) `bash /var/www/tiendo/start-wsl.sh` → (2) terminal mới: `cd frontend && npm run dev` → mở http://localhost:5173. Mỗi lần restart WSL phải chạy lại vì không có systemd.
+- **Migration hiện tại**: 17 migrations, tất cả DONE. Bộ `1000xx` đã xóa. Chỉ còn `0001_*` (3 files) + `093131_personal_access_tokens` + `1200xx` (13 files).
+- **Admin account**: `admin@tiendo.vn` / `Admin@2026`. Được seed qua `AdminUserSeeder`, đọc `ADMIN_PASSWORD` từ `.env`.
+- **Vite proxy**: `/api/*` → `:8000` trong dev. Khi build prod (`npm run build`), frontend được serve bởi Laravel (hoặc Nginx) nên không cần proxy.
+- **Nginx chưa cài trên WSL** — không cần cho dev. Deploy VPS thật mới cần theo `deploy/nginx.conf`.
+
+---
+
 ### Session: Sprint 2 wrap-up + Sprint 3 full
 
 **Tasks hoàn thành (theo thứ tự):**
@@ -198,3 +335,9 @@
 | feat: auth + project CRUD (reference) | Controller + FormRequest + Policy + Service + Repository + Resource; Base Controller dùng AuthorizesRequests/ValidatesRequests; migrations đúng thứ tự; SESSION_DRIVER=file cho API. | — |
 | feat: sprint2-wrap + sprint3-full | Layer history (kể cả deleted), member invite PATCH-06 (temporary_password), Excel Import (preview+apply, PhpSpreadsheet 5.x), Share Link (viewer-only, public endpoint 410). 66 tests / 300 assertions pass. Backend API hoàn tất 100%. | Frontend React SPA + Deploy VPS chưa làm |
 | feat: frontend-sprint1-deliverable | Frontend SPA hoàn chỉnh Sprint 1: Auth + routing, AdminUsers, ProjectDetail (ML/Layer/Member), Canvas foundation (tile+zone+mark Fabric.js, zoom/pan CSS transform), CanvasEditor (polygon/rect draw toolbar, ZoneCreateModal), CanvasProgress (own-zone highlight, mark draw, StatusPopup), CanvasView (read-only + Export Excel), ShareView (public token). Lint + build 0 error. | Sprint 2: Comments, Zone History, Notifications; Sprint 3: Settings UI, Excel Import UI |
+| chore: wsl-dev-setup | WSL dev environment: tạo `start-wsl.sh` (PostgreSQL + queue + artisan serve + pid management), thêm Vite proxy (`/api` → :8000). Fix migration trùng lặp (xóa bộ 1000xx, giữ 1200xx), `migrate:fresh` → 17/17 DONE. Thêm `ADMIN_PASSWORD` vào `.env`, re-seed admin. Verified: API login OK + Vite dev server OK. | Không có — hệ thống WSL sẵn sàng để phát triển và test |
+| fix: e2e-sprint1-bugs | 7 bugs fixed: (1) ProjectList thiếu nút "Tạo dự án" → thêm CreateProjectModal; (2) start-wsl.sh chạy wrong Laravel dir → fix dùng `./backend/`; (3) geometry_pct format mismatch `[x,y]` vs `{x,y}` → normalizeGeometry ở store + toApiGeometry ở CanvasEditor; (4) TileLayer URL sai `0_x_y.jpg` → `/0/x/y`; (5) Tile 401 vì img tag → move tile route ra public; (6) PATCH /status thiếu completion_pct → fix backend + frontend smart PUT/PATCH; (7) backend admin seed → tinker trực tiếp. Build 0 lỗi. | Full E2E flow verified qua API: login → tạo project → ML → upload PDF → ready → zone → status amber |
+| fix: sprint2-3-ui-bugs | 6 fixes: (1) CommentsTab: thêm PM delete permission + 10MB/file validation + reset list khi đổi zone; (2) HistoryTab: fix canRollback chỉ check admin → dùng isPM prop, thêm fetchZonesAndMarks(layerId) sau rollback, reset list khi đổi zone; (3) ZoneDetailPanel: truyền layerId + isPM xuống tabs; (4) backend move GET /comments/{id}/images/{filename} ra ngoài auth middleware (như tiles) + remove authorize('viewImage'); (5) SettingsTab export: thay `<a href>` bằng Axios blob download (auth header được gửi đúng); (6) ExcelImportModal: gọi fetchZonesAndMarks(layerId) khi đóng sau apply. Lint 0 error, build 0 error. | — |
+| fix: stats-field-name-mismatch | Bug "undefined%": backend trả `progress_pct`/`completed`/`in_progress`/`delayed`/`paused`/`not_started` nhưng frontend type dùng `completion_pct`/`done_zones`/`in_progress_zones`/`delayed_zones`/`paused_zones`/`not_started_zones`. Fix: cập nhật `ProjectStats` type + tất cả `project.stats.*` references để match đúng field name từ `ProjectDashboardRepository`. Thêm `Math.round()` cho `progress_pct`. Lint 0 error, build 0 error. Verified: CommentsTab/HistoryTab/Notifications/AppShell bell badge đều đã implement đầy đủ. | — |
+| feat: anh-duong-brand-design | Apply Ánh Dương brand tokens (SPEC §16): (1) index.css: --primary=24 100% 58% (#FF7F29 orange), --primary-foreground=white, Inter font import, brand CSS vars; (2) tailwind.config: thêm brand.{DEFAULT,hover,light} colors; (3) AppShell: header bg-[#FF7F29] + white text, nav links white/80 inactive, logout border-white/40, mobile menu bg-[#E5691D]; (4) Login: logo text-[#FF7F29] font-bold centered, card shadow-lg; (5) ProjectList: code badge bg-[#FFF3E8] text-[#FF7F29] rounded-full, card hover border-[#FF7F29]; (6) ProjectDetail: Stat component bg-[#F8FAFC] highlight prop cho Tiến độ text-[#FF7F29], fix completion_pct ?? 0 bug, TabButton → underline style border-b-2 border-[#FF7F29], project code badge orange, layer card bg-[#F8FAFC]; (7) CanvasEditor: zone selected border-l-2 border-[#FF7F29] bg-[#FFF3E8], tab active border-[#FF7F29] text-[#FF7F29], Lưu button bg-[#FF7F29]. Lint 0 error, build 0 error. | — |
+| feat: ui-redesign-full | **Redesign toàn bộ UI theo style direction "Bento Box + Soft UI + Flat Design"**. Dùng Lucide icons xuyên suốt. (1) **Login**: full-screen centered, radial gradient bg, icon T, rounded-2xl card, inputs với focus ring cam, button rounded-xl; (2) **AppShell**: Avatar circle với initials, Lucide Bell icon, h-14 header fixed, hamburger Lucide Menu/X, logout Lucide LogOut; (3) **ProjectList**: MapPin/Plus/FolderOpen/Building2 icons, skeleton loading, card rounded-2xl hover border-[#FF7F29], CreateProjectModal dùng inputCls với focus ring cam; (4) **ProjectDetail**: Stat component bento grid với icon (Layers/CheckCircle2/HardHat/AlertTriangle/PauseCircle/TrendingUp), project header với Building2 icon + MapPin, ChevronLeft back link, skeleton loading; (5) **CanvasEditor**: ChevronLeft breadcrumb, sidebar header với count badge rounded-full, zone items rounded-lg no border-b, filter chips border màu status tương ứng, legend và panels dùng rounded-xl + border-[#E2E8F0], ZoneDetailPanel header bg-[#F8FAFC], fieldCls với focus ring cam, Lưu button rounded-xl; (6) **CanvasToolbar**: Lucide MousePointer2/Pentagon/RectangleHorizontal, h-9 w-9 buttons rounded-lg, container rounded-xl; (7) **ZoomControls**: Lucide Minus/Plus/Maximize2, compact h-8 w-8 buttons, container rounded-xl; (8) **Notifications**: Lucide Bell/BellOff/CheckCheck/Clock icons, notification item icon-per-type, unread bg-[#FFF3E8] border-[#FF7F29]/30, empty state BellOff icon, "Đọc tất cả" button text-[#FF7F29]. Lint 0 error, build 0 error. | — |

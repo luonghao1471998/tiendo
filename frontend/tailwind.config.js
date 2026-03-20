@@ -5,6 +5,11 @@ export default {
   theme: {
     extend: {
       colors: {
+        brand: {
+          DEFAULT: '#FF7F29',
+          hover:   '#E5691D',
+          light:   '#FFF3E8',
+        },
         border: 'hsl(var(--border))',
         input: 'hsl(var(--input))',
         ring: 'hsl(var(--ring))',

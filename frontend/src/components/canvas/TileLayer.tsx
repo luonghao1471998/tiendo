@@ -8,8 +8,9 @@ interface TileLayerProps {
 
 /**
  * Renders the layer background as a grid of <img> tiles.
- * Tile path convention: GET /api/v1/layers/{id}/tiles/0_{x}_{y}.jpg
- * Tiles are 1024x1024 JPEG. x, y are tile column/row indices (0-based).
+ * Tile path convention: GET /api/v1/layers/{id}/tiles/{z}/{x}/{y}
+ * Backend constructs filename as {z}_{x}_{y}.jpg internally.
+ * Tiles are 1024x1024 JPEG. x, y are tile column/row indices (0-based). z=0 fixed.
  */
 export default function TileLayer({ layerId, widthPx, heightPx }: TileLayerProps) {
   const cols = Math.ceil(widthPx / TILE_SIZE)
@@ -40,7 +41,7 @@ export default function TileLayer({ layerId, widthPx, heightPx }: TileLayerProps
       {tiles.map(({ x, y, left, top, w, h }) => (
         <img
           key={`${x}_${y}`}
-          src={`/api/v1/layers/${layerId}/tiles/0_${x}_${y}.jpg`}
+          src={`/api/v1/layers/${layerId}/tiles/0/${x}/${y}`}
           alt=""
           draggable={false}
           style={{

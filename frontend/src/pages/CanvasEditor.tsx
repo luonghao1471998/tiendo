@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
+import { ChevronLeft } from 'lucide-react'
 
 import client from '@/api/client'
 import CanvasToolbar from '@/components/canvas/CanvasToolbar'
@@ -158,10 +159,286 @@ function ZoneCreateModal({
   )
 }
 
+// ─── Comment types ───────────────────────────────────────────────────────────
+
+type Comment = {
+  id: number
+  zone_id: number
+  user_id: number
+  user_name: string
+  content: string | null
+  images: string[]
+  created_at: string
+}
+
+// ─── History types ────────────────────────────────────────────────────────────
+
+type HistoryEntry = {
+  id: number
+  action: 'created' | 'updated' | 'status_changed' | 'deleted' | 'restored'
+  user_name: string
+  changes: Record<string, { from: unknown; to: unknown }> | null
+  snapshot_before: Record<string, unknown> | null
+  restored_from_log_id: number | null
+  created_at: string
+}
+
+// ─── CommentsTab ─────────────────────────────────────────────────────────────
+
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024 // 10 MB per file
+
+function CommentsTab({ zone, isPM }: { zone: Zone; isPM: boolean }) {
+  const { user } = useAuthStore()
+  const [comments, setComments] = useState<Comment[]>([])
+  const [loading, setLoading] = useState(true)
+  const [posting, setPosting] = useState(false)
+  const [text, setText] = useState('')
+  const [files, setFiles] = useState<File[]>([])
+  const [err, setErr] = useState<string | null>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    setLoading(true)
+    setComments([])
+    void (client.get(`/zones/${zone.id}/comments`) as Promise<{ data: ApiResponse<Comment[]> }>)
+      .then((r) => setComments(r.data.data ?? []))
+      .catch(() => setErr('Không tải được bình luận.'))
+      .finally(() => setLoading(false))
+  }, [zone.id])
+
+  const submit = async () => {
+    if (!text.trim() && files.length === 0) return
+    if (files.length > 5) { setErr('Tối đa 5 ảnh.'); return }
+    const oversized = files.find((f) => f.size > MAX_IMAGE_BYTES)
+    if (oversized) { setErr(`"${oversized.name}" vượt quá 10 MB.`); return }
+    setPosting(true); setErr(null)
+    try {
+      const fd = new FormData()
+      if (text.trim()) fd.append('content', text.trim())
+      files.forEach((f) => fd.append('images[]', f))
+      const resp = (await client.post(`/zones/${zone.id}/comments`, fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })) as { data: ApiResponse<Comment> }
+      setComments((prev) => [...prev, resp.data.data])
+      setText('')
+      setFiles([])
+      if (fileRef.current) fileRef.current.value = ''
+    } catch (e) {
+      setErr(parseApiError(e, 'Gửi thất bại.'))
+    } finally {
+      setPosting(false)
+    }
+  }
+
+  const deleteComment = async (id: number) => {
+    if (!confirm('Xóa bình luận này?')) return
+    try {
+      await client.delete(`/comments/${id}`)
+      setComments((prev) => prev.filter((c) => c.id !== id))
+    } catch (e) {
+      setErr(parseApiError(e, 'Xóa thất bại.'))
+    }
+  }
+
+  const BASE = import.meta.env.VITE_API_BASE_URL ?? '/api/v1'
+
+  return (
+    <div className="flex flex-col gap-2 p-3">
+      {loading ? (
+        <p className="text-center text-xs text-muted-foreground py-4">Đang tải...</p>
+      ) : comments.length === 0 ? (
+        <p className="text-center text-xs text-muted-foreground py-4">Chưa có bình luận.</p>
+      ) : (
+        <ul className="space-y-2 max-h-52 overflow-y-auto">
+          {comments.map((c) => (
+            <li key={c.id} className="rounded-lg border bg-muted/30 p-2 text-xs">
+              <div className="flex items-center justify-between mb-1">
+                <span className="font-medium">{c.user_name}</span>
+                <span className="text-muted-foreground text-[10px]">
+                  {new Date(c.created_at).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                </span>
+              </div>
+              {c.content ? <p className="mb-1 text-xs">{c.content}</p> : null}
+              {c.images.length > 0 ? (
+                <div className="flex flex-wrap gap-1 mt-1">
+                  {c.images.map((img) => (
+                    <a key={img} href={`${BASE}/comments/${c.id}/images/${img}`} target="_blank" rel="noreferrer">
+                      <img
+                        src={`${BASE}/comments/${c.id}/images/${img}`}
+                        alt={img}
+                        className="h-12 w-12 rounded object-cover border"
+                      />
+                    </a>
+                  ))}
+                </div>
+              ) : null}
+              {(user?.id === c.user_id || isPM) ? (
+                <button
+                  type="button"
+                  onClick={() => void deleteComment(c.id)}
+                  className="mt-1 text-[10px] text-red-500 hover:underline"
+                >
+                  Xóa
+                </button>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {err ? <p className="text-xs text-red-600">{err}</p> : null}
+
+      <div className="space-y-1.5 border-t pt-2">
+        <textarea
+          className="w-full rounded-md border bg-background px-2 py-1.5 text-xs"
+          rows={2}
+          placeholder="Nhập bình luận..."
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+        />
+        <div className="flex items-center gap-2">
+          <label className="cursor-pointer rounded-md border px-2 py-1 text-xs text-muted-foreground hover:bg-muted">
+            📎 Ảnh ({files.length}/5)
+            <input
+              ref={fileRef}
+              type="file"
+              multiple
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => {
+                const picked = Array.from(e.target.files ?? []).slice(0, 5)
+                const oversized = picked.find((f) => f.size > MAX_IMAGE_BYTES)
+                if (oversized) { setErr(`"${oversized.name}" vượt quá 10 MB.`); return }
+                setErr(null)
+                setFiles(picked)
+              }}
+            />
+          </label>
+          <button
+            type="button"
+            onClick={() => void submit()}
+            disabled={posting || (!text.trim() && files.length === 0)}
+            className="ml-auto rounded-md bg-primary px-3 py-1 text-xs text-primary-foreground disabled:opacity-60"
+          >
+            {posting ? 'Đang gửi...' : 'Gửi'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── HistoryTab ───────────────────────────────────────────────────────────────
+
+const ACTION_LABELS: Record<HistoryEntry['action'], string> = {
+  created: 'Tạo mới',
+  updated: 'Cập nhật',
+  status_changed: 'Đổi trạng thái',
+  deleted: 'Xóa',
+  restored: 'Khôi phục',
+}
+
+function HistoryTab({ zone, isPM, layerId }: { zone: Zone; isPM: boolean; layerId: number }) {
+  const { updateZone, fetchZonesAndMarks } = useCanvasStore()
+  const [entries, setEntries] = useState<HistoryEntry[]>([])
+  const [loading, setLoading] = useState(true)
+  const [rollingBack, setRollingBack] = useState<number | null>(null)
+  const [err, setErr] = useState<string | null>(null)
+
+  const canRollback = isPM
+
+  useEffect(() => {
+    setLoading(true)
+    setEntries([])
+    void (client.get(`/zones/${zone.id}/history`) as Promise<{ data: ApiResponse<HistoryEntry[]> }>)
+      .then((r) => setEntries(r.data.data ?? []))
+      .catch(() => setErr('Không tải được lịch sử.'))
+      .finally(() => setLoading(false))
+  }, [zone.id])
+
+  const rollback = async (logId: number) => {
+    if (!confirm('Hoàn tác thay đổi này?')) return
+    setRollingBack(logId); setErr(null)
+    try {
+      const resp = (await client.post(`/activity-logs/${logId}/rollback`)) as {
+        data: ApiResponse<Zone>
+      }
+      updateZone(resp.data.data)
+      // Refresh full canvas so all zone colors update
+      void fetchZonesAndMarks(layerId)
+      // Reload history list
+      const h = (await client.get(`/zones/${zone.id}/history`)) as {
+        data: ApiResponse<HistoryEntry[]>
+      }
+      setEntries(h.data.data ?? [])
+    } catch (e) {
+      setErr(parseApiError(e, 'Khôi phục thất bại.'))
+    } finally {
+      setRollingBack(null)
+    }
+  }
+
+  if (loading) {
+    return <p className="p-3 text-center text-xs text-muted-foreground">Đang tải...</p>
+  }
+
+  return (
+    <div className="p-3">
+      {err ? <p className="mb-2 text-xs text-red-600">{err}</p> : null}
+      {entries.length === 0 ? (
+        <p className="text-center text-xs text-muted-foreground py-4">Chưa có lịch sử.</p>
+      ) : (
+        <ul className="space-y-2 max-h-72 overflow-y-auto">
+          {entries.map((e) => {
+            const canRb = canRollback && e.action !== 'restored' && !e.restored_from_log_id
+            return (
+              <li key={e.id} className="border-l-2 border-muted pl-3 text-xs">
+                <div className="flex items-start justify-between gap-1">
+                  <div className="flex-1 min-w-0">
+                    <span className="font-medium">{ACTION_LABELS[e.action]}</span>
+                    <span className="mx-1 text-muted-foreground">·</span>
+                    <span className="text-muted-foreground">{e.user_name}</span>
+                    {e.action === 'status_changed' && e.changes?.status ? (
+                      <p className="text-[10px] text-muted-foreground mt-0.5">
+                        {String(e.changes.status.from)} → {String(e.changes.status.to)}
+                      </p>
+                    ) : null}
+                  </div>
+                  <div className="flex shrink-0 flex-col items-end gap-1">
+                    <span className="text-[10px] text-muted-foreground whitespace-nowrap">
+                      {new Date(e.created_at).toLocaleDateString('vi-VN', {
+                        day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
+                      })}
+                    </span>
+                    {canRb ? (
+                      <button
+                        type="button"
+                        disabled={rollingBack === e.id}
+                        onClick={() => void rollback(e.id)}
+                        className="rounded border px-1.5 py-0.5 text-[10px] text-blue-600 hover:bg-blue-50 disabled:opacity-60"
+                      >
+                        {rollingBack === e.id ? '...' : 'Khôi phục'}
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </div>
+  )
+}
+
 // ─── ZoneDetailPanel ─────────────────────────────────────────────────────────
 
-function ZoneDetailPanel({ zone, onClose }: { zone: Zone; onClose: () => void }) {
+type PanelTab = 'detail' | 'comments' | 'history'
+
+function ZoneDetailPanel({ zone, layerId, onClose }: { zone: Zone; layerId: number; onClose: () => void }) {
+  const { user } = useAuthStore()
   const { updateZone, removeZone } = useCanvasStore()
+  const [tab, setTab] = useState<PanelTab>('detail')
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [status, setStatus] = useState(zone.status)
@@ -170,12 +447,40 @@ function ZoneDetailPanel({ zone, onClose }: { zone: Zone; onClose: () => void })
   const [deadline, setDeadline] = useState(zone.deadline ?? '')
   const [err, setErr] = useState<string | null>(null)
 
+  // Reset form when zone changes
+  useEffect(() => {
+    setStatus(zone.status)
+    setPct(zone.completion_pct)
+    setNotes(zone.notes ?? '')
+    setDeadline(zone.deadline ?? '')
+    setErr(null)
+    setTab('detail')
+  }, [zone.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const isPM = user?.role === 'admin' ||
+    user?.projects.some((p) => p.role === 'project_manager') === true
+
   const save = async () => {
     setSaving(true); setErr(null)
     try {
-      const resp = (await client.patch(`/zones/${zone.id}`, {
-        status, completion_pct: pct, notes, deadline: deadline || null,
-      })) as { data: ApiResponse<Zone> }
+      let resp: { data: ApiResponse<Zone> }
+      if (status !== zone.status) {
+        // Status is changing — use PATCH /status (state machine)
+        resp = (await client.patch(`/zones/${zone.id}/status`, {
+          status,
+          completion_pct: pct,
+          notes,
+          deadline: deadline || null,
+        })) as { data: ApiResponse<Zone> }
+      } else {
+        // Only updating fields — use PUT /zones/{id}
+        resp = (await client.put(`/zones/${zone.id}`, {
+          name: zone.name,
+          completion_pct: pct,
+          notes,
+          deadline: deadline || null,
+        })) as { data: ApiResponse<Zone> }
+      }
       updateZone(resp.data.data)
     } catch (e) {
       setErr(parseApiError(e, 'Lưu thất bại.'))
@@ -198,62 +503,100 @@ function ZoneDetailPanel({ zone, onClose }: { zone: Zone; onClose: () => void })
   }
 
   const color = ZONE_STATUS_COLOR[zone.status] ?? '#9CA3AF'
+  const tabs: { key: PanelTab; label: string }[] = [
+    { key: 'detail', label: 'Chi tiết' },
+    { key: 'comments', label: 'Bình luận' },
+    { key: 'history', label: 'Lịch sử' },
+  ]
+
+  const fieldCls = 'w-full rounded-lg border border-[#E2E8F0] bg-white px-2.5 py-1.5 text-sm text-[#0F172A] transition focus:border-[#FF7F29] focus:outline-none focus:ring-2 focus:ring-[#FF7F29]/20'
 
   return (
-    <div className="space-y-3 p-3">
-      <div className="flex items-start justify-between">
+    <div>
+      {/* Zone header */}
+      <div className="flex items-center gap-2.5 bg-[#F8FAFC] px-3 py-2.5">
+        <div className="h-3 w-3 shrink-0 rounded-full" style={{ backgroundColor: color }} />
         <div className="min-w-0 flex-1">
-          <p className="text-xs text-muted-foreground">{zone.zone_code}</p>
-          <p className="truncate font-semibold">{zone.name}</p>
+          <p className="truncate text-sm font-semibold text-[#0F172A] leading-snug">{zone.name}</p>
+          <p className="text-[10px] text-[#94A3B8]">{zone.zone_code}</p>
         </div>
-        <div className="ml-2 h-3 w-3 shrink-0 rounded-full" style={{ backgroundColor: color }} />
       </div>
 
-      <div>
-        <label className="mb-1 block text-xs font-medium">Trạng thái</label>
-        <select
-          className="w-full rounded-md border bg-background px-2 py-1.5 text-sm"
-          value={status}
-          onChange={(e) => setStatus(e.target.value as Zone['status'])}
-        >
-          {ZONE_STATUS.map((s) => (
-            <option key={s} value={s}>{STATUS_LABELS[s]}</option>
-          ))}
-        </select>
+      {/* Tabs */}
+      <div className="flex border-b border-[#E2E8F0] text-xs">
+        {tabs.map((t) => (
+          <button
+            key={t.key}
+            type="button"
+            onClick={() => setTab(t.key)}
+            className={`flex-1 cursor-pointer py-2.5 font-medium transition-all duration-150 ${
+              tab === t.key
+                ? 'border-b-2 border-[#FF7F29] text-[#FF7F29]'
+                : 'text-[#64748B] hover:text-[#0F172A]'
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
       </div>
 
-      <div>
-        <label className="mb-1 flex justify-between text-xs font-medium">
-          <span>Tiến độ</span><span className="font-bold">{pct}%</span>
-        </label>
-        <input type="range" min={0} max={100} value={pct}
-          onChange={(e) => setPct(Number(e.target.value))} className="w-full" />
-      </div>
+      {/* Tab content */}
+      {tab === 'detail' ? (
+        <div className="space-y-3 p-3">
+          <div>
+            <label className="mb-1.5 block text-xs font-medium text-[#64748B]">Trạng thái</label>
+            <select className={fieldCls} value={status}
+              onChange={(e) => setStatus(e.target.value as Zone['status'])}>
+              {ZONE_STATUS.map((s) => (
+                <option key={s} value={s}>{STATUS_LABELS[s]}</option>
+              ))}
+            </select>
+          </div>
 
-      <div>
-        <label className="mb-1 block text-xs font-medium">Deadline</label>
-        <input type="date" className="w-full rounded-md border bg-background px-2 py-1.5 text-sm"
-          value={deadline} onChange={(e) => setDeadline(e.target.value)} />
-      </div>
+          <div>
+            <label className="mb-1.5 flex justify-between text-xs font-medium text-[#64748B]">
+              <span>Tiến độ</span>
+              <span className="font-bold text-[#FF7F29]">{pct}%</span>
+            </label>
+            <input type="range" min={0} max={100} value={pct}
+              onChange={(e) => setPct(Number(e.target.value))}
+              className="w-full accent-[#FF7F29]" />
+          </div>
 
-      <div>
-        <label className="mb-1 block text-xs font-medium">Ghi chú</label>
-        <textarea className="w-full rounded-md border bg-background px-2 py-1.5 text-sm"
-          rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
-      </div>
+          <div>
+            <label className="mb-1.5 block text-xs font-medium text-[#64748B]">Deadline</label>
+            <input type="date" className={fieldCls}
+              value={deadline} onChange={(e) => setDeadline(e.target.value)} />
+          </div>
 
-      {err ? <p className="text-xs text-red-600">{err}</p> : null}
+          <div>
+            <label className="mb-1.5 block text-xs font-medium text-[#64748B]">Ghi chú</label>
+            <textarea className={fieldCls}
+              rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
+          </div>
 
-      <div className="flex gap-2">
-        <button type="button" onClick={() => void save()} disabled={saving}
-          className="flex-1 rounded-md bg-primary py-1.5 text-sm text-primary-foreground disabled:opacity-60">
-          {saving ? 'Đang lưu...' : 'Lưu'}
-        </button>
-        <button type="button" onClick={() => void del()} disabled={deleting}
-          className="rounded-md border border-red-300 px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 disabled:opacity-60">
-          Xóa
-        </button>
-      </div>
+          {err ? (
+            <div className="rounded-lg border border-red-200 bg-red-50 px-2.5 py-2 text-xs text-red-700">{err}</div>
+          ) : null}
+
+          <div className="flex gap-2">
+            <button type="button" onClick={() => void save()} disabled={saving}
+              className="flex-1 cursor-pointer rounded-xl bg-[#FF7F29] py-2 text-sm font-semibold text-white transition hover:bg-[#E5691D] disabled:opacity-60">
+              {saving ? 'Đang lưu...' : 'Lưu'}
+            </button>
+            {isPM ? (
+              <button type="button" onClick={() => void del()} disabled={deleting}
+                className="cursor-pointer rounded-xl border border-red-200 px-3 py-2 text-sm text-red-500 transition hover:bg-red-50 hover:text-red-600 disabled:opacity-60">
+                Xóa
+              </button>
+            ) : null}
+          </div>
+        </div>
+      ) : tab === 'comments' ? (
+        <CommentsTab zone={zone} isPM={isPM} />
+      ) : (
+        <HistoryTab zone={zone} isPM={isPM} layerId={layerId} />
+      )}
     </div>
   )
 }
@@ -317,6 +660,23 @@ export default function CanvasEditor() {
     setDrawMode('select') // switch back to select while modal is open
   }
 
+  // Convert frontend Geometry to API payload format:
+  // - rect → polygon (4 points)
+  // - points: [x,y] → {x, y}
+  const toApiGeometry = (geo: Geometry): { type: 'polygon'; points: { x: number; y: number }[] } => {
+    let rawPoints: [number, number][]
+    if (geo.type === 'rect') {
+      const x = geo.x ?? 0
+      const y = geo.y ?? 0
+      const w = geo.width ?? 0
+      const h = geo.height ?? 0
+      rawPoints = [[x, y], [x + w, y], [x + w, y + h], [x, y + h]]
+    } else {
+      rawPoints = (geo.points ?? []) as [number, number][]
+    }
+    return { type: 'polygon', points: rawPoints.map(([px, py]) => ({ x: px, y: py })) }
+  }
+
   // Create zone via API
   const handleZoneCreate = async (formData: {
     name: string; assignee: string; deadline: string; tasks: string; notes: string
@@ -326,7 +686,7 @@ export default function CanvasEditor() {
     try {
       const resp = (await client.post(`/layers/${layerIdNum}/zones`, {
         name: formData.name,
-        geometry_pct: pendingGeometry,
+        geometry_pct: toApiGeometry(pendingGeometry),
         assignee: formData.assignee || null,
         deadline: formData.deadline || null,
         tasks: formData.tasks || null,
@@ -338,6 +698,8 @@ export default function CanvasEditor() {
       setCreatingZone(false)
     }
   }
+
+  const [sidebarOpen, setSidebarOpen] = useState(false)
 
   const selectedZone = selectedZoneId != null ? zones.find((z) => z.id === selectedZoneId) : null
   const visibleZones = filterStatus ? zones.filter((z) => z.status === filterStatus) : zones
@@ -366,24 +728,37 @@ export default function CanvasEditor() {
       ) : null}
 
       <div
-        style={{ height: 'calc(100vh - 65px)', display: 'flex', flexDirection: 'column' }}
+        style={{ height: 'calc(100vh - 56px)', display: 'flex', flexDirection: 'column' }}
         className="overflow-hidden"
       >
-        {/* Context bar */}
-        <div className="flex items-center gap-3 border-b bg-card px-4 py-2 text-sm">
-          <Link to={`/projects/${projectIdNum}`} className="text-muted-foreground hover:underline">
-            ← Dự án
+        {/* Context bar / Breadcrumb */}
+        <div className="flex items-center gap-2 border-b border-[#E2E8F0] bg-white px-4 py-2 text-sm">
+          <Link
+            to={`/projects/${projectIdNum}`}
+            className="flex cursor-pointer items-center gap-1 text-[#64748B] transition hover:text-[#FF7F29]"
+          >
+            <ChevronLeft size={15} />
+            Dự án
           </Link>
-          <span className="text-muted-foreground">/</span>
-          <span className="font-medium">{layer?.name ?? `Layer #${layerIdNum}`}</span>
+          <span className="text-[#CBD5E1]">/</span>
+          <span className="truncate font-medium text-[#0F172A]">{layer?.name ?? `Layer #${layerIdNum}`}</span>
           {!layerReady && layer ? (
-            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-700">
+            <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-700">
               {layer.status === 'processing' ? 'Đang xử lý...' : layer.status}
             </span>
           ) : null}
-          <span className="ml-auto text-xs text-muted-foreground">
-            {zones.length} khu vực
-          </span>
+          <div className="ml-auto flex items-center gap-2 shrink-0">
+            <span className="hidden text-xs text-[#94A3B8] sm:inline">
+              {zones.length} khu vực
+            </span>
+            <button
+              type="button"
+              onClick={() => setSidebarOpen((o) => !o)}
+              className="cursor-pointer rounded-lg border border-[#E2E8F0] px-2.5 py-1 text-xs text-[#64748B] transition hover:bg-[#F8FAFC] lg:hidden"
+            >
+              {sidebarOpen ? '✕ Đóng' : '≡ Khu vực'}
+            </button>
+          </div>
         </div>
 
         {/* Main area */}
@@ -413,27 +788,29 @@ export default function CanvasEditor() {
               </div>
             )}
 
-            {/* Draw toolbar — top-left */}
-            <div className="absolute left-4 top-4 z-10">
+            {/* Draw toolbar — desktop only */}
+            <div className="absolute left-4 top-4 z-10 hidden lg:block">
               <CanvasToolbar mode={drawMode} onModeChange={setDrawMode} />
             </div>
 
             {/* Hint when in draw mode */}
             {drawMode !== 'select' ? (
-              <div className="absolute left-1/2 top-4 z-10 -translate-x-1/2 rounded-lg border bg-background/90 px-4 py-2 text-xs shadow backdrop-blur-sm">
+              <div className="absolute left-1/2 top-4 z-10 hidden -translate-x-1/2 rounded-xl border border-[#E2E8F0] bg-white/95 px-4 py-2 text-xs shadow-md backdrop-blur-sm lg:block">
                 {drawMode === 'draw_polygon'
                   ? 'Click để đặt điểm • Double-click để kết thúc (min 3 điểm)'
                   : 'Click và kéo để vẽ hình chữ nhật'}
               </div>
             ) : null}
 
-            {/* Filter chips — bottom row above ZoomControls */}
-            <div className="absolute bottom-16 left-4 z-10 flex flex-wrap gap-1">
+            {/* Filter chips */}
+            <div className="absolute bottom-16 left-4 z-10 flex flex-wrap gap-1.5">
               <button
                 type="button"
                 onClick={() => setFilterStatus(null)}
-                className={`rounded-full border px-2.5 py-0.5 text-xs font-medium backdrop-blur-sm ${
-                  !filterStatus ? 'bg-foreground text-background' : 'bg-background/80 hover:bg-background'
+                className={`cursor-pointer rounded-full border px-3 py-1 text-xs font-medium shadow-sm backdrop-blur-sm transition-all duration-150 ${
+                  !filterStatus
+                    ? 'border-[#0F172A] bg-[#0F172A] text-white'
+                    : 'border-[#E2E8F0] bg-white/90 text-[#64748B] hover:bg-white'
                 }`}
               >
                 Tất cả
@@ -442,9 +819,12 @@ export default function CanvasEditor() {
                 <button
                   key={s}
                   type="button"
-                  style={filterStatus === s ? { backgroundColor: ZONE_STATUS_COLOR[s], color: '#fff', borderColor: ZONE_STATUS_COLOR[s] } : {}}
-                  className={`rounded-full border px-2.5 py-0.5 text-xs font-medium backdrop-blur-sm ${
-                    filterStatus === s ? '' : 'bg-background/80 hover:bg-background'
+                  style={filterStatus === s
+                    ? { backgroundColor: ZONE_STATUS_COLOR[s], color: '#fff', borderColor: ZONE_STATUS_COLOR[s] }
+                    : { borderColor: ZONE_STATUS_COLOR[s] + '80' }
+                  }
+                  className={`cursor-pointer rounded-full border px-3 py-1 text-xs font-medium shadow-sm backdrop-blur-sm transition-all duration-150 ${
+                    filterStatus === s ? '' : 'bg-white/90 hover:bg-white'
                   }`}
                   onClick={() => setFilterStatus(filterStatus === s ? null : s)}
                 >
@@ -459,34 +839,55 @@ export default function CanvasEditor() {
             </div>
 
             {/* Legend */}
-            <div className="absolute bottom-4 right-4 z-10 flex flex-col gap-1 rounded-lg border bg-background/90 p-2 backdrop-blur-sm text-xs">
+            <div className="absolute bottom-4 right-4 z-10 flex flex-col gap-1.5 rounded-xl border border-[#E2E8F0] bg-white/95 p-2.5 shadow-sm backdrop-blur-sm text-xs">
               {ZONE_STATUS.map((s) => (
                 <div key={s} className="flex items-center gap-2">
                   <span className="h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: ZONE_STATUS_COLOR[s] }} />
-                  {STATUS_LABELS[s]}
+                  <span className="text-[#64748B]">{STATUS_LABELS[s]}</span>
                 </div>
               ))}
             </div>
           </div>
 
+          {/* Sidebar backdrop — mobile/tablet */}
+          {sidebarOpen ? (
+            <div
+              className="fixed inset-0 z-10 bg-black/40 lg:hidden"
+              onClick={() => setSidebarOpen(false)}
+            />
+          ) : null}
+
           {/* Sidebar */}
-          <aside className="flex w-80 flex-col border-l bg-card">
-            <div className="border-b px-4 py-3">
-              <p className="font-semibold">Khu vực</p>
-              <p className="text-sm text-muted-foreground">
-                {visibleZones.length}/{zones.length} khu vực
-              </p>
+          <aside
+            className={[
+              'flex w-72 flex-col border-l border-[#E2E8F0] bg-white',
+              'lg:relative lg:flex lg:w-80',
+              sidebarOpen ? 'fixed inset-y-0 right-0 z-20 flex' : 'hidden',
+            ].join(' ')}
+            style={sidebarOpen ? { top: 'calc(56px + 41px)' } : {}}
+          >
+            {/* Sidebar header */}
+            <div className="flex items-center justify-between border-b border-[#E2E8F0] px-4 py-3">
+              <div className="flex items-center gap-2">
+                <p className="font-semibold text-[#0F172A]">Khu vực</p>
+                <span className="rounded-full bg-[#F1F5F9] px-2 py-0.5 text-xs font-medium text-[#64748B]">
+                  {visibleZones.length}/{zones.length}
+                </span>
+              </div>
             </div>
 
-            <div className="min-h-0 flex-1 overflow-y-auto">
+            {/* Zone list */}
+            <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
               {visibleZones.length === 0 ? (
-                <div className="p-4 text-center text-sm text-muted-foreground">
-                  {zones.length === 0
-                    ? 'Chưa có khu vực. Dùng toolbar ở góc trên trái để vẽ zone.'
-                    : 'Không có zone phù hợp với bộ lọc.'}
+                <div className="flex flex-col items-center justify-center py-10 text-center">
+                  <p className="text-sm text-[#64748B]">
+                    {zones.length === 0
+                      ? 'Chưa có khu vực. Dùng toolbar để vẽ zone.'
+                      : 'Không có zone phù hợp bộ lọc.'}
+                  </p>
                 </div>
               ) : (
-                <ul>
+                <ul className="space-y-0.5">
                   {visibleZones.map((zone) => {
                     const color = ZONE_STATUS_COLOR[zone.status] ?? '#9CA3AF'
                     const isSelected = zone.id === selectedZoneId
@@ -494,14 +895,23 @@ export default function CanvasEditor() {
                       <li key={zone.id}>
                         <button
                           type="button"
-                          className={`flex w-full items-center gap-2.5 border-b px-4 py-2 text-left text-sm hover:bg-muted/40 ${
-                            isSelected ? 'bg-primary/10 font-medium' : ''
+                          className={`flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm transition-all duration-150 ${
+                            isSelected
+                              ? 'border-l-2 border-l-[#FF7F29] bg-[#FFF3E8] font-medium text-[#0F172A]'
+                              : 'text-[#64748B] hover:bg-[#F8FAFC] hover:text-[#0F172A]'
                           }`}
-                          onClick={() => selectZone(isSelected ? null : zone.id)}
+                          onClick={() => {
+                            selectZone(isSelected ? null : zone.id)
+                            if (!isSelected) setSidebarOpen(true)
+                          }}
                         >
                           <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: color }} />
                           <span className="flex-1 truncate">{zone.name}</span>
-                          <span className="text-xs text-muted-foreground">{zone.completion_pct}%</span>
+                          <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-xs ${
+                            isSelected ? 'bg-[#FF7F29]/15 text-[#FF7F29]' : 'bg-[#F1F5F9] text-[#94A3B8]'
+                          }`}>
+                            {zone.completion_pct}%
+                          </span>
                         </button>
                       </li>
                     )
@@ -511,8 +921,8 @@ export default function CanvasEditor() {
             </div>
 
             {selectedZone ? (
-              <div className="border-t">
-                <ZoneDetailPanel zone={selectedZone} onClose={() => selectZone(null)} />
+              <div className="border-t border-[#E2E8F0] overflow-y-auto">
+                <ZoneDetailPanel zone={selectedZone} layerId={layerIdNum} onClose={() => selectZone(null)} />
               </div>
             ) : null}
           </aside>

@@ -37,7 +37,6 @@ export default function Login() {
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setError(null)
-
     try {
       await login(email.trim(), password)
       navigate('/projects', { replace: true })
@@ -47,46 +46,78 @@ export default function Login() {
   }
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-md flex-col justify-center px-6">
-      <h1 className="mb-2 text-3xl font-semibold">TienDo</h1>
-      <p className="mb-6 text-sm text-muted-foreground">Đăng nhập để quản lý tiến độ công trường</p>
+    <main
+      className="flex min-h-screen w-full items-center justify-center px-4"
+      style={{
+        background: '#F8FAFC',
+        backgroundImage:
+          'radial-gradient(circle at 20% 20%, #FFF3E8 0%, transparent 50%), radial-gradient(circle at 80% 80%, #FFF3E8 0%, transparent 50%)',
+      }}
+    >
+      <div className="w-full max-w-sm">
+        {/* Logo */}
+        <div className="mb-8 text-center">
+          <div className="mb-3 inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-[#FF7F29] shadow-lg">
+            <span className="text-2xl font-black text-white">T</span>
+          </div>
+          <h1 className="text-3xl font-bold tracking-tight text-[#FF7F29]">TienDo</h1>
+          <p className="mt-1.5 text-sm text-[#64748B]">Quản lý tiến độ thi công trực quan</p>
+        </div>
 
-      <form className="space-y-4 rounded-xl border bg-card p-5" onSubmit={handleSubmit}>
-        <label className="block text-sm font-medium">
-          Email
-          <input
-            className="mt-1 w-full rounded-md border bg-background px-3 py-2"
-            type="email"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-            required
-            autoComplete="email"
-          />
-        </label>
-
-        <label className="block text-sm font-medium">
-          Mật khẩu
-          <input
-            className="mt-1 w-full rounded-md border bg-background px-3 py-2"
-            type="password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            required
-            autoComplete="current-password"
-          />
-        </label>
-
-        {error ? <p className="text-sm text-red-600">{error}</p> : null}
-
-        <button
-          className="w-full rounded-md bg-primary px-4 py-2 text-primary-foreground disabled:opacity-60"
-          type="submit"
-          disabled={loading}
+        {/* Card */}
+        <form
+          className="rounded-2xl border border-[#E2E8F0] bg-white p-8 shadow-lg"
+          onSubmit={handleSubmit}
         >
-          {loading ? 'Đang đăng nhập...' : 'Đăng nhập'}
-        </button>
-      </form>
+          <h2 className="mb-6 text-lg font-semibold text-[#0F172A]">Đăng nhập</h2>
+
+          <div className="space-y-4">
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-[#0F172A]">Email</label>
+              <input
+                className="w-full rounded-lg border border-[#E2E8F0] bg-white px-3 py-2.5 text-sm text-[#0F172A] placeholder:text-[#94A3B8] transition focus:border-[#FF7F29] focus:outline-none focus:ring-2 focus:ring-[#FF7F29]/30"
+                type="email"
+                placeholder="admin@company.vn"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+                autoComplete="email"
+              />
+            </div>
+
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-[#0F172A]">Mật khẩu</label>
+              <input
+                className="w-full rounded-lg border border-[#E2E8F0] bg-white px-3 py-2.5 text-sm text-[#0F172A] placeholder:text-[#94A3B8] transition focus:border-[#FF7F29] focus:outline-none focus:ring-2 focus:ring-[#FF7F29]/30"
+                type="password"
+                placeholder="••••••••"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                autoComplete="current-password"
+              />
+            </div>
+          </div>
+
+          {error ? (
+            <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-700">
+              {error}
+            </div>
+          ) : null}
+
+          <button
+            className="mt-6 w-full cursor-pointer rounded-xl bg-[#FF7F29] py-2.5 text-sm font-semibold text-white transition-all duration-150 hover:bg-[#E5691D] disabled:cursor-not-allowed disabled:opacity-60"
+            type="submit"
+            disabled={loading}
+          >
+            {loading ? 'Đang đăng nhập...' : 'Đăng nhập'}
+          </button>
+        </form>
+
+        <p className="mt-6 text-center text-xs text-[#64748B]">
+          © {new Date().getFullYear()} Ánh Dương Construction
+        </p>
+      </div>
     </main>
   )
 }
-

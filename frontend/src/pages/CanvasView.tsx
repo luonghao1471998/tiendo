@@ -280,6 +280,7 @@ export default function CanvasView() {
 
   const [filterStatus, setFilterStatus] = useState<string | null>(null)
   const [zonePopup, setZonePopup] = useState<{ zone: Zone; x: number; y: number } | null>(null)
+  const [sidebarOpen, setSidebarOpen] = useState(false)
 
   const zones = useCanvasStore((s) => s.zones)
   const lastSyncAt = useCanvasStore((s) => s.lastSyncAt)
@@ -356,24 +357,25 @@ export default function CanvasView() {
           ← Dự án
         </Link>
         <span className="text-muted-foreground">/</span>
-        <span className="font-medium">{layer?.name ?? `Layer #${layerIdNum}`}</span>
-        <span className="rounded-full bg-sky-100 px-2 py-0.5 text-xs font-medium text-sky-700">
+        <span className="font-medium truncate">{layer?.name ?? `Layer #${layerIdNum}`}</span>
+        <span className="rounded-full bg-sky-100 px-2 py-0.5 text-xs font-medium text-sky-700 shrink-0">
           Chỉ xem
         </span>
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex items-center gap-2 shrink-0">
           <button
             type="button"
             onClick={() => void handleExport()}
             disabled={exporting}
-            className="flex items-center gap-1.5 rounded-lg border bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-100 disabled:opacity-60"
+            className="hidden items-center gap-1.5 rounded-lg border bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-100 disabled:opacity-60 sm:flex"
           >
-            {exporting ? (
-              'Đang xuất...'
-            ) : (
-              <>
-                <span>⬇</span> Xuất Excel
-              </>
-            )}
+            {exporting ? 'Đang xuất...' : <><span>⬇</span> Xuất Excel</>}
+          </button>
+          <button
+            type="button"
+            onClick={() => setSidebarOpen((o) => !o)}
+            className="rounded-md border px-2 py-1 text-xs lg:hidden"
+          >
+            {sidebarOpen ? '✕ Đóng' : '☰ Khu vực'}
           </button>
         </div>
       </div>
@@ -452,8 +454,23 @@ export default function CanvasView() {
           </div>
         </div>
 
+        {/* Sidebar backdrop */}
+        {sidebarOpen ? (
+          <div
+            className="fixed inset-0 z-10 bg-black/40 lg:hidden"
+            onClick={() => setSidebarOpen(false)}
+          />
+        ) : null}
+
         {/* Sidebar — zone list read-only */}
-        <aside className="flex w-72 flex-col border-l bg-card">
+        <aside
+          className={[
+            'flex w-72 flex-col border-l bg-card',
+            'lg:relative lg:flex',
+            sidebarOpen ? 'fixed inset-y-0 right-0 z-20 flex' : 'hidden',
+          ].join(' ')}
+          style={sidebarOpen ? { top: 'calc(65px + 40px + 36px)' } : {}}
+        >
           <div className="border-b px-4 py-3">
             <p className="font-semibold">Khu vực</p>
             <p className="text-sm text-muted-foreground">{zones.length} khu vực</p>

@@ -1,7 +1,7 @@
 # PROJECT-STATUS.md — TienDo
 > File này dùng để upload lên Claude AI Web / Project để AI giữ context xuyên phiên.
 > Cập nhật sau mỗi session. Source of truth: SPEC.md + CLAUDE.md.
-> **Ngày cập nhật:** 2026-03-17
+> **Ngày cập nhật:** 2026-03-20
 
 ---
 
@@ -11,7 +11,8 @@
 
 - PM khoanh zone trên bản vẽ → field team tô mark tiến độ → dashboard real-time
 - Stack: Laravel 11 (PHP 8.2) + PostgreSQL 14 + React 18 + TypeScript + Vite + Fabric.js 5.x
-- Server: Ubuntu 22.04 + Nginx + Supervisor (queue) + Certbot SSL
+- Dev: WSL2 Ubuntu + `php artisan serve` (port 8000) + Vite dev server (port 5173)
+- Production target: Ubuntu 22.04 + Nginx + Supervisor (queue) + Certbot SSL
 
 ---
 
@@ -19,7 +20,7 @@
 
 ### ✅ Backend API — HOÀN TẤT 100%
 
-**66 feature tests / 300 assertions — tất cả pass** (PostgreSQL `tiendo_test`)
+**66 feature tests / 300 assertions — tất cả pass** (PostgreSQL `tiendo`)
 
 #### Toàn bộ API endpoints đã có:
 
@@ -54,7 +55,7 @@ MASTER LAYER / LAYER
   POST   /api/v1/master-layers/{id}/layers         (upload PDF → ProcessPdfJob → tiles)
   GET    /api/v1/layers/{id}
   DELETE /api/v1/layers/{id}
-  GET    /api/v1/layers/{id}/tiles/{z}/{x}/{y}     (auth, Cache-Control: max-age=86400)
+  GET    /api/v1/layers/{id}/tiles/{z}/{x}/{y}     ← PUBLIC (như img tag), Cache-Control: max-age=86400
   POST   /api/v1/layers/{id}/retry
 
 ZONE
@@ -75,7 +76,7 @@ COMMENT + ẢNH
   GET    /api/v1/zones/{id}/comments
   POST   /api/v1/zones/{id}/comments               (multipart, max 5 ảnh/10MB)
   DELETE /api/v1/comments/{id}
-  GET    /api/v1/comments/{id}/images/{filename}   (auth)
+  GET    /api/v1/comments/{id}/images/{filename}   ← PUBLIC (như img tag) — ảnh không cần auth token
 
 SYNC
   GET    /api/v1/layers/{id}/sync?since=ISO8601    (polling 30s)
@@ -89,11 +90,11 @@ EXPORT
   GET    /api/v1/layers/{id}/export/excel
   GET    /api/v1/projects/{id}/export/excel
 
-EXCEL IMPORT (Sprint 3)
+EXCEL IMPORT
   POST   /api/v1/layers/{id}/import                (preview — không ghi DB)
   POST   /api/v1/excel-imports/{id}/apply          (batch update zones, 1 lần)
 
-SHARE LINK (Sprint 3 — viewer-only)
+SHARE LINK (viewer-only)
   GET    /api/v1/projects/{id}/share-links
   POST   /api/v1/projects/{id}/share-links         {expires_in_days: 1|7|30}
   DELETE /api/v1/share-links/{id}
@@ -113,38 +114,38 @@ HEALTH
 ```
 
 #### Background tasks:
-- **Queue worker:** `php artisan queue:work --queue=pdf-processing` (Supervisor, 1 process, timeout 120s, tries 3)
+- **Queue worker:** `php artisan queue:work --queue=pdf-processing,default` (Supervisor / nohup dev, timeout 300s, tries 3)
 - **Cron:** `tiendo:check-deadlines` chạy `dailyAt('06:00')` — tìm zone deadline ≤ 3 ngày, notify PM + assignee, có dedupe
 
 ---
 
-### 🟡 Frontend React SPA — SPRINT 1 HOÀN TẤT
+### ✅ Frontend React SPA — SPRINT 1 + 2 + 3 HOÀN TẤT + BRAND DESIGN + BUG FIXES + UI REDESIGN
 
 **Lint + Build: 0 error, 0 warning** (`npm run lint && npm run build` pass clean)
 
 #### Pages đã implement đầy đủ:
 
-| Page | Route | Trạng thái |
-|---|---|---|
-| `Login.tsx` | `/login` | ✅ Form email/password + authStore |
-| `ProjectList.tsx` | `/` | ✅ Cards grid, filter, link |
-| `ProjectDetail.tsx` | `/projects/:id` | ✅ Tab Mặt bằng (ML+Layer CRUD + PDF upload + polling) + Tab Thành viên (invite + remove) + Tab Cài đặt |
-| `AdminUsers.tsx` | `/admin/users` | ✅ Table + inline edit (GET/PUT /users), admin-only guard |
-| `CanvasEditor.tsx` | `/layers/:id/editor` | ✅ CanvasToolbar (select/polygon/rect), ZoneCreateModal, ZoneDetailPanel, sync polling |
-| `CanvasProgress.tsx` | `/layers/:id/progress` | ✅ Own-zone highlight, StatusPopup, mark polygon draw, MarkPopup |
-| `CanvasView.tsx` | `/layers/:id/view` | ✅ Read-only, StatsBar, filter chips, Export Excel (blob) |
-| `ShareView.tsx` | `/share/:token` | ✅ Public (no auth), layer selector, canvas read-only |
-| `Notifications.tsx` | `/notifications` | 🚧 Placeholder |
+| Page | Route | Sprint | Trạng thái |
+|---|---|---|---|
+| `Login.tsx` | `/login` | 1 | ✅ Full-screen centered; radial gradient bg; logo icon T + "TienDo" cam; card rounded-2xl; inputs focus ring cam; button rounded-xl |
+| `ProjectList.tsx` | `/` | 1 | ✅ Lucide MapPin/Plus/Building2/FolderOpen; skeleton loading; card rounded-2xl hover border cam; empty state đẹp |
+| `ProjectDetail.tsx` | `/projects/:id` | 1+3 | ✅ Bento grid stats với Lucide icons (Layers/CheckCircle2/HardHat/AlertTriangle/PauseCircle/TrendingUp); project header Building2 + MapPin; ChevronLeft breadcrumb; Tab Mặt bằng + Thành viên + Cài đặt |
+| `AdminUsers.tsx` | `/admin/users` | 1 | ✅ Table + inline edit (GET/PUT /users), admin-only guard |
+| `CanvasEditor.tsx` | `/projects/:id/layers/:id/editor` | 1+2 | ✅ ChevronLeft breadcrumb; sidebar zone items rounded-lg no border-b; count badge rounded-full; filter chips màu status; ZoneDetailPanel inputs focus ring cam; Lưu rounded-xl |
+| `CanvasProgress.tsx` | `/projects/:id/layers/:id/progress` | 1+2 | ✅ Own-zone highlight, StatusPopup, mark draw, MarkPopup — responsive drawer sidebar |
+| `CanvasView.tsx` | `/projects/:id/layers/:id/view` | 1+2 | ✅ Read-only, StatsBar, filter chips, Export Excel |
+| `ShareView.tsx` | `/share/:token` | 1 | ✅ Public (no auth), layer selector, canvas read-only |
+| `Notifications.tsx` | `/notifications` | 2 | ✅ BellOff empty state; icon per type (Bell/Clock); unread bg-[#FFF3E8] border cam; "Đọc tất cả" CheckCheck icon |
 
-#### Canvas components đã implement:
+#### Canvas components:
 
 | Component | Trạng thái | Ghi chú |
 |---|---|---|
 | `CanvasWrapper.tsx` | ✅ | CSS transform zoom/pan, wheel + alt+drag |
-| `TileLayer.tsx` | ✅ | Grid `<img>` tiles `0_{x}_{y}.jpg` |
+| `TileLayer.tsx` | ✅ | Grid `<img>` tiles `/0/{x}/{y}` (slash-separated, no extension) |
 | `PolygonLayer.tsx` | ✅ | 4 useEffects (init/render/handlers/cursor), Fabric.js |
-| `CanvasToolbar.tsx` | ✅ | Select / Draw Polygon / Draw Rect |
-| `ZoomControls.tsx` | ✅ | +/–/Fit/% display |
+| `CanvasToolbar.tsx` | ✅ | Lucide MousePointer2/Pentagon/RectangleHorizontal; h-9 w-9 buttons rounded-lg; container rounded-xl |
+| `ZoomControls.tsx` | ✅ | Lucide Minus/Plus/Maximize2; compact h-8 w-8 buttons; panel rounded-xl |
 
 #### Stores:
 
@@ -152,43 +153,72 @@ HEALTH
 |---|---|
 | `authStore.ts` | ✅ login/logout/initSession/hasProjectRole, token localStorage |
 | `canvasStore.ts` | ✅ zones/marks, selectedZoneId, panX/panY, fetchZonesAndMarks, syncSince, CRUD actions |
-| `projectStore.ts` | 🚧 Scaffold (data fetch inline trong pages) |
 
-#### Chức năng nổi bật đã hoạt động:
-- Login → token Bearer trong Axios interceptor → các route protected
-- Upload PDF multipart → polling 3s (useRef Set) → badge "Đang xử lý" tự cập nhật khi ready/failed
-- Vẽ zone polygon (click đặt điểm → dbl-click finish) + rect (mousedown→drag→mouseup) trên Fabric.js
-- ZoneCreateModal sau khi vẽ xong → POST /layers/{id}/zones → hiện trên canvas ngay
-- Zone color-coded theo status (5 màu), filter chips, legend
-- Mark draw polygon bên trong zone (own-zone highlight opacity 0.08 cho zone khác)
-- Export Excel: `GET /layers/{id}/export/excel` với Axios responseType: 'blob' → browser download
-- ShareView: `publicClient` Axios không có Bearer, public route hoạt động độc lập
+#### Sprint 2 — Tính năng bổ sung:
+
+- **CommentsTab** (trong ZoneDetailPanel): fetch/add/delete; PM có thể xóa mọi comment; validate max 5 ảnh + 10MB/file; reset list khi đổi zone
+- **HistoryTab** (trong ZoneDetailPanel): timeline activity log; Rollback button cho PM/admin (`isPM` prop); sau rollback gọi `fetchZonesAndMarks(layerId)` để refresh canvas; reset list khi đổi zone
+- **ZoneDetailPanel tabbed**: 3 tabs — Chi tiết / Bình luận / Lịch sử; nhận `layerId` prop để pass cho HistoryTab
+- **Notifications page**: bell icon, unread badge polling 60s (`useUnreadCount` hook), mark read/all
+- **AppShell responsive**: hamburger menu mobile, notification badge, `MainNavLink`/`MobileNavLink`
+- **Responsive polish**: tất cả pages dùng Tailwind breakpoints, sidebar = fixed drawer trên mobile/tablet
+
+#### Sprint 3 — Tính năng bổ sung:
+
+- **SettingsTab** (ProjectDetail): form edit project info (name/description/address), Share Link management (create/copy/revoke), Export Excel qua Axios blob download (auth header được gửi đúng — không dùng `<a href>`)
+- **ExcelImportModal**: 3-stage workflow (Upload → Preview → Applied); khi đóng từ stage Applied gọi `fetchZonesAndMarks(layerId)` để refresh canvas nếu đang mở layer đó
+
+#### Bug fixes (post-brand):
+
+- **Stats bar "undefined%"**: Backend `ProjectDashboardRepository` trả `progress_pct` / `completed` / `in_progress` / `delayed` / `paused` / `not_started` — frontend type cũ dùng sai tên (`completion_pct`, `done_zones`, `in_progress_zones`...). Fix: cập nhật `ProjectStats` type + render để match đúng field names. Thêm `Math.round()` cho `progress_pct` (float từ DB `AVG()`).
+
+#### Brand Design — Ánh Dương (#FF7F29):
+
+- **`index.css`**: `--primary: 24 100% 58%` (orange), `--primary-foreground: white`; Inter font; brand CSS vars `--color-primary*`
+- **`tailwind.config.js`**: thêm `brand.{DEFAULT, hover, light}` colors
+- **AppShell header**: `bg-[#FF7F29]` + white text cho tất cả children; nav active `bg-white/20`; mobile menu `bg-[#E5691D]`
+- **Login**: logo `text-[#FF7F29] font-bold text-4xl`; card `shadow-lg border-[#E2E8F0]`
+- **ProjectList**: code badge `bg-[#FFF3E8] text-[#FF7F29] rounded-full`; card hover `border-[#FF7F29]`
+- **ProjectDetail**: `Stat` surface `bg-[#F8FAFC]`, Tiến độ `highlight` → `text-[#FF7F29]`; `TabButton` → underline `border-b-2 border-[#FF7F29]`; code badge cam; layer card `bg-[#F8FAFC]`
+- **CanvasEditor**: zone selected `border-l-2 border-l-[#FF7F29] bg-[#FFF3E8]`; tab active `text-[#FF7F29]`; Lưu button `bg-[#FF7F29]`
+
+#### UI Redesign — Bento Box + Soft UI + Flat Design (2026-03-17):
+
+- **Style direction**: Bento Box Grid (stats), Soft UI Evolution (cards/panels/sidebar), Flat Design (toolbar/badges/chips); Lucide icons xuyên suốt; NO emoji làm icon
+- **`Login.tsx`**: radial gradient bg `#F8FAFC`; logo icon T trong ô cam rounded-2xl; card `rounded-2xl shadow-lg`; inputs `focus:ring-2 focus:ring-[#FF7F29]/30 focus:border-[#FF7F29] rounded-lg`; button `rounded-xl font-semibold`
+- **`AppShell.tsx`**: header `h-14` fixed; Avatar circle với initials (bg-white/25 ring-white/30); Lucide `Bell` thay emoji; hamburger `Menu/X` Lucide; logout `LogOut` Lucide; `cursor-pointer` trên tất cả buttons
+- **`ProjectList.tsx`**: Lucide `Plus/MapPin/Building2/FolderOpen`; skeleton loading animated; card `rounded-2xl`; CreateProjectModal inputs focus ring cam; empty state BollsFolderOpen icon + message
+- **`ProjectDetail.tsx`**: `Stat` bento card với icon prop (Lucide icons theo loại); "Tiến độ" card `border-[#FF7F29]/30 bg-[#FFF3E8]`; project header Building2 icon + MapPin; `ChevronLeft` back link; skeleton loading
+- **`CanvasEditor.tsx`**: context bar `ChevronLeft` breadcrumb; sidebar header với count badge `rounded-full bg-[#F1F5F9]`; zone items `rounded-lg` no `border-b`, % badge `rounded-full`; filter chips border màu status khi inactive; ZoneDetailPanel `fieldCls` với focus ring cam; Lưu/Xóa buttons `rounded-xl`; `accent-[#FF7F29]` cho range input
+- **`CanvasToolbar.tsx`**: Lucide `MousePointer2/Pentagon/RectangleHorizontal`; buttons `h-9 w-9 rounded-lg`; container `rounded-xl border-[#E2E8F0] bg-white`
+- **`ZoomControls.tsx`**: Lucide `Minus/Plus/Maximize2`; buttons `h-8 w-8 rounded-lg`; container `rounded-xl border-[#E2E8F0] bg-white`
+- **`Notifications.tsx`**: `BellOff` empty state với message đẹp; icon per type (Bell cam / Clock amber cho deadline); unread item `bg-[#FFF3E8] border-[#FF7F29]/30`; "Đọc tất cả" button với `CheckCheck` icon `text-[#FF7F29]`
 
 ---
 
-### ❌ Frontend — CÒN THIẾU (Sprint 2 + 3)
+### ✅ Deploy files — HOÀN TẤT (chờ VPS thực tế)
 
-| Tính năng | Sprint | Endpoint cần |
-|---|---|---|
-| Comments tab trong ZoneDetailPanel | 2 | `GET/POST /zones/{id}/comments`, `DELETE /comments/{id}` |
-| Zone History tab + Rollback button | 2 | `GET /zones/{id}/history`, `POST /activity-logs/{id}/rollback` |
-| Notifications page (bell icon, unread count) | 2 | `GET /notifications`, `GET /notifications/unread-count`, `PATCH /notifications/{id}/read` |
-| AppShell notification badge | 2 | `GET /notifications/unread-count` (polling) |
-| Responsive polish (tablet/mobile) | 2 | — |
-| Settings tab — edit project info | 3 | `PUT /projects/{id}` |
-| Settings tab — Share Link management UI | 3 | `GET/POST/DELETE /projects/{id}/share-links` |
-| Excel Import UI (upload → preview → apply) | 3 | `POST /layers/{id}/import`, `POST /excel-imports/{id}/apply` |
+| File | Mô tả |
+|---|---|
+| `deploy/nginx.conf` | Nginx config: HTTP→HTTPS redirect, SSL placeholder, SPA fallback, PHP-FPM 8.2 socket |
+| `deploy/php-fpm-tiendo.conf` | PHP-FPM pool riêng socket `/run/php/php8.2-fpm-tiendo.sock` |
+| `deploy/supervisor.conf` | Supervisor queue worker `pdf-processing,default` |
+| `deploy/.env.production` | Template `.env` production với placeholders |
+| `deploy/install.sh` | Fresh Ubuntu 22.04 setup: PHP 8.2, Composer, Node 20, PostgreSQL 14, Python deps |
+| `deploy/deploy.sh` | CI/CD script: git pull, migrate, npm build, seed, restart services |
+| `DEPLOY.md` | Hướng dẫn deploy step-by-step đầy đủ |
+| `start-wsl.sh` | WSL dev startup: PostgreSQL + migrate + queue worker + artisan serve (chạy từ `./backend/`) |
 
 ---
 
-### ❌ Deploy VPS — CHƯA LÀM
+### ⏳ Deploy VPS — CHỜ SERVER THỰC TẾ
 
-Cần:
-- Nginx config (PHP 8.2 FPM pool riêng, song song PHP 7.4 cho projects cũ)
-- Supervisor config (queue worker `pdf-processing`)
-- Cron (`* * * * * php artisan schedule:run`)
-- `.env` production
-- Certbot SSL
+Đã có đủ config files trong `deploy/`. Chỉ cần khi có VPS + domain:
+1. Clone repo lên server
+2. Chạy `bash deploy/install.sh`
+3. Cấu hình `.env` production
+4. Chạy `bash deploy/deploy.sh`
+5. Certbot SSL: `certbot --nginx -d yourdomain.com`
 
 ---
 
@@ -202,15 +232,28 @@ Request → Controller (FormRequest + authorize Policy)
         → Resource (JSON response)
 ```
 
-### Key constraints cần nhớ khi làm frontend:
-- Tọa độ zone/mark lưu **% (0.0–1.0)** dưới dạng `[number, number][]` (array of [x,y]) — KHÔNG phải pixel, KHÔNG phải `{x,y}[]`
+### Stats field names (backend → frontend):
+| Backend (`ProjectDashboardRepository`) | Frontend (`ProjectStats` type) |
+|---|---|
+| `progress_pct` (float, AVG) | `progress_pct` → hiển thị `Math.round(progress_pct)%` |
+| `completed` | `completed` |
+| `in_progress` | `in_progress` |
+| `delayed` | `delayed` |
+| `paused` | `paused` |
+| `not_started` | `not_started` |
+| `total_zones` | `total_zones` |
+
+### Key constraints:
+- Tọa độ zone/mark lưu **% (0.0–1.0)** dưới dạng `{type: 'polygon', points: [{x,y}]}` trên API; frontend normalize về `[number, number][]` nội bộ
 - Zoom/pan qua **CSS transform** trên CanvasWrapper — KHÔNG dùng Fabric.js zoom API
-- `fabric.Canvas.getPointer()` tự tính `cssScale` nên pointer coordinates vẫn đúng dù CSS scale thay đổi
+- `fabric.Canvas.getPointer()` tự tính `cssScale` → pointer coordinates đúng dù CSS scale thay đổi
 - Render order: tiles → zone fill → mark fill → zone border → labels
-- **KHÔNG dùng PDF.js** — tiles serve từ `/layers/{id}/tiles/0_{x}_{y}.jpg` (format `{z}_{x}_{y}`)
-- Polling sync mỗi **30 giây** khi đang mở canvas (`setInterval` trong CanvasEditor)
+- **KHÔNG dùng PDF.js** — tiles serve từ `/layers/{id}/tiles/0/{x}/{y}` (slash-separated, z=0 fixed)
+- Tile route + comment image route đều **PUBLIC** (ngoài auth middleware) — `<img>` tags không gửi được Bearer token
+- Polling sync mỗi **30 giây** khi đang mở canvas
 - Public route `/api/v1/share/{token}` — nginx không được block
 - `GET /api/v1/health` — public health check
+- Export Excel dùng **Axios blob download** (`responseType: 'blob'`) — không dùng `<a href>` trực tiếp vì cần auth header
 
 ### Zone status colors:
 ```
@@ -223,11 +266,8 @@ paused      → #8B5CF6  (fill opacity 0.15)
 
 ### Response format chuẩn:
 ```json
-// Success
 { "success": true, "data": {...} }
 { "success": true, "data": [...], "meta": { "current_page": 1, "per_page": 20, "total": 45 } }
-
-// Error
 { "success": false, "error": { "code": "ERROR_CODE", "message": "...", "details": {} } }
 ```
 
@@ -250,19 +290,23 @@ Global role (users.role):  admin
 Project role (project_members.role): project_manager | field_team | viewer
 
 admin          → toàn quyền mọi project (không cần gán vào project_members)
-project_manager → CRUD zone, quản lý members, mọi transition, export, rollback
+project_manager → CRUD zone, quản lý members, mọi transition, export, rollback, xóa mọi comment
 field_team     → update status/% + tô mark CHỈ trên zone assigned cho mình
 viewer         → read-only + export
 ```
 
 **Member invite:**
 - `POST /projects/{id}/members/invite {email, name?, role}`
-- Email chưa có → tạo user + response có `temporary_password` (chỉ 1 lần, không lưu DB) — frontend hiển thị 1 lần, không lưu lại
-- PM chỉ tạo được `field_team` / `viewer` — không tạo `project_manager`
+- Email chưa có → tạo user + response có `temporary_password` (chỉ 1 lần, không lưu DB)
+- PM chỉ tạo được `field_team` / `viewer`
 
 **Zone transitions theo role:**
 - `field_team`: chỉ tự mình (`assignee_id === user.id`) + chỉ `not_started→in_progress`, `in_progress→completed`, `in_progress→paused`
 - `project_manager` / `admin`: mọi transition
+
+**Comment delete:**
+- Author có thể xóa comment của mình
+- PM/admin có thể xóa mọi comment
 
 ---
 
@@ -283,98 +327,116 @@ frontend/src/
 ├── pages/
 │   ├── Login.tsx
 │   ├── ProjectList.tsx
-│   ├── ProjectDetail.tsx      ← Tab Mặt bằng + Thành viên + Cài đặt
-│   ├── CanvasEditor.tsx       ← Zone draw toolbar + ZoneCreateModal + ZoneDetailPanel
-│   ├── CanvasProgress.tsx     ← Mark draw + StatusPopup + MarkPopup
-│   ├── CanvasView.tsx         ← Read-only + Export Excel
-│   ├── Notifications.tsx      ← Placeholder
+│   ├── ProjectDetail.tsx      ← Tab Mặt bằng + Thành viên + Cài đặt (Settings + ExcelImportModal + ExportButton)
+│   ├── CanvasEditor.tsx       ← Zone draw toolbar + ZoneCreateModal + ZoneDetailPanel (3 tabs)
+│   ├── CanvasProgress.tsx     ← Mark draw + StatusPopup + MarkPopup, responsive drawer
+│   ├── CanvasView.tsx         ← Read-only + Export Excel, responsive drawer
+│   ├── Notifications.tsx      ← List, mark read/all, unread badge
 │   ├── AdminUsers.tsx         ← GET/PUT /users
 │   └── ShareView.tsx          ← Public, publicClient (no Bearer)
 └── components/
     ├── layout/
-    │   └── AppShell.tsx       ← Header, nav, logout
+    │   └── AppShell.tsx       ← Header cam #FF7F29 h-14; Avatar initials circle; Lucide Bell badge; hamburger Menu/X; nav responsive
     ├── canvas/
     │   ├── CanvasWrapper.tsx  ← CSS transform zoom/pan
-    │   ├── TileLayer.tsx      ← Grid <img> tiles
+    │   ├── TileLayer.tsx      ← Grid <img> tiles `/0/{x}/{y}` (public route)
     │   ├── PolygonLayer.tsx   ← Fabric.js (4 useEffects: init/render/handlers/cursor)
-    │   ├── CanvasToolbar.tsx  ← Select/Polygon/Rect mode
+    │   ├── CanvasToolbar.tsx  ← Select/Polygon/Rect mode (export type CanvasDrawMode)
     │   └── ZoomControls.tsx   ← +/–/Fit/%
     └── ui/                    ← shadcn/ui components
 ```
 
 ### Gotchas quan trọng:
-- **PolygonLayer 4 useEffects**: init / render / event-handlers / cursor phải tách riêng để handlers có `drawMode` mới nhất mà không dispose canvas
-- **Polygon dblclick**: Fabric fires `mouse:down` TRƯỚC `dblclick` → cần `drawPts.pop()` trong handler `mouse:dblclick` để loại điểm thừa
-- **Layer polling**: `processingLayerIdsRef` (useRef Set) để `setInterval` không cần `layers` trong deps → tránh infinite re-render
+- **PolygonLayer 4 useEffects**: init / render / event-handlers / cursor — tách riêng để handlers có `drawMode` mới nhất không dispose canvas
+- **Polygon dblclick**: Fabric fires `mouse:down` TRƯỚC `dblclick` → `drawPts.pop()` trong `mouse:dblclick` handler
+- **Layer polling**: `processingLayerIdsRef` (useRef Set) để `setInterval` không cần `layers` trong deps
 - **publicClient**: Separate Axios instance KHÔNG có auth interceptor — dùng trong `ShareView.tsx`
-- **Tile URL format**: `/api/v1/layers/{id}/tiles/0_{x}_{y}.jpg` (underscore, z=0 fixed)
+- **Tile URL format**: `/api/v1/layers/{id}/tiles/0/{x}/{y}` (slash-separated, z=0 fixed, NO `.jpg` extension, public route)
+- **Comment image URL**: `/api/v1/comments/{id}/images/{filename}` (public route — `<img>` tag không cần token)
+- **geometry_pct**: API nhận/trả `{type: 'polygon', points: [{x,y}]}`; frontend dùng `toApiGeometry()` khi gửi, `normalizeGeometry()` khi nhận
+- **Export Excel**: dùng `client.get(..., { responseType: 'blob' })` + `URL.createObjectURL` — KHÔNG dùng `<a href>` trực tiếp
+- **CommentsTab**: multipart `FormData` cho ảnh upload; PM có quyền xóa; `isPM` prop từ ZoneDetailPanel; reset `comments` khi `zone.id` đổi
+- **HistoryTab**: `isPM` + `layerId` prop; sau rollback gọi `fetchZonesAndMarks(layerId)`; reset `entries` khi `zone.id` đổi
+- **useUnreadCount hook**: `poll` async function đặt *bên trong* `useEffect` để tránh ESLint `react-hooks/set-state-in-effect`
+- **Responsive drawer**: sidebar = `fixed inset-y-0 right-0 z-20` trên mobile/tablet, `lg:relative lg:w-80` trên desktop
+- **SettingsTab**: `clipboard.writeText()` cho copy share link, `window.location.origin` để build full URL
+- **Primary color**: CSS var `--primary: 24 100% 58%` = `hsl(24, 100%, 58%)` ≈ #FF7F29 Ánh Dương orange; `--primary-foreground: white`
 
 ---
 
-## 6. Việc cần làm tiếp theo
+## 6. Environment — WSL Dev
 
-### Ưu tiên 1 — Frontend Sprint 2
+### Cách chạy:
+```bash
+# Terminal 1 — khởi động backend + DB + queue
+bash /var/www/tiendo/start-wsl.sh
 
-**Comments trong ZoneDetailPanel:**
-- Tab "Bình luận" bên trong ZoneDetailPanel (CanvasEditor + CanvasProgress)
-- `GET /zones/{id}/comments` → list với ảnh thumbnails
-- `POST /zones/{id}/comments` multipart (text + tối đa 5 ảnh)
-- `DELETE /comments/{id}` (chỉ author)
+# Terminal 2 — frontend dev server
+cd /var/www/tiendo/frontend && npm run dev
 
-**Zone History + Rollback:**
-- Tab "Lịch sử" trong ZoneDetailPanel
-- `GET /zones/{id}/history` → timeline (actor, action, before/after)
-- `POST /activity-logs/{id}/rollback` → button Rollback (PM/admin)
-
-**Notifications:**
-- `Notifications.tsx` page — list với đánh dấu đã đọc
-- AppShell bell icon + unread badge (polling 60s `GET /notifications/unread-count`)
-
-### Ưu tiên 2 — Frontend Sprint 3
-
-**Share Link Management UI** (Settings tab trong ProjectDetail):
-- List share links (còn hạn / hết hạn)
-- Tạo link mới (chọn expires_in_days: 1/7/30)
-- Revoke link
-
-**Excel Import UI:**
-- Upload .xlsx → gọi `POST /layers/{id}/import` → hiển thị preview table (zones sẽ được cập nhật gì)
-- "Apply" button → `POST /excel-imports/{id}/apply` → done
-
-### Ưu tiên 3 — Deploy VPS
-
-Sau khi frontend end-to-end ổn:
-- Nginx config PHP 8.2 FPM (song song PHP 7.4)
-- Supervisor queue worker
-- Certbot SSL
-- `.env` production
-
----
-
-## 7. Environment hiện tại
-
+# Mở trình duyệt: http://localhost:5173
+# Dừng: bash /var/www/tiendo/start-wsl.sh stop
 ```
+
+### .env hiện tại (dev WSL):
+```
+APP_ENV=local
+APP_URL=http://localhost:8000
 DB_CONNECTION=pgsql
-DB_DATABASE=tiendo_test        ← dùng cho cả dev + test (đổi production sau)
-SANCTUM_TOKEN_EXPIRATION=10080 (7 ngày)
+DB_HOST=127.0.0.1
+DB_PORT=5432
+DB_DATABASE=tiendo
+DB_USERNAME=tiendo
+DB_PASSWORD=Tiendo@2026
+QUEUE_CONNECTION=database
+SANCTUM_TOKEN_EXPIRATION=10080   (7 ngày)
+ADMIN_PASSWORD=Admin@2026
 PYTHON_BIN=/usr/bin/python3
-UPLOAD_MAX_PDF_SIZE=52428800   (50MB)
-UPLOAD_MAX_IMAGE_SIZE=10485760 (10MB)
+UPLOAD_MAX_PDF_SIZE=52428800     (50MB)
+UPLOAD_MAX_IMAGE_SIZE=10485760   (10MB)
 UPLOAD_MAX_IMAGES_PER_COMMENT=5
 FRONTEND_URL=http://localhost:5173
 ```
 
+### Tài khoản admin:
+```
+Email:    admin@tiendo.vn
+Password: Admin@2026
+Role:     admin
+```
+
+### Database:
+- **17/17 migrations** tất cả DONE (bộ `1000xx` cũ đã xóa, giữ `1200xx`)
+- DB name: `tiendo` (không phải `tiendo_test`)
+- Seeded: 1 admin user (tạo qua `php artisan tinker` trong `start-wsl.sh`)
+
+### Vite proxy (dev):
+- `/api/*` → `http://localhost:8000` (không cần CORS config riêng)
+- `/storage/*` → `http://localhost:8000`
+
 ---
 
-## 8. Git log gần nhất
+## 7. Git log gần nhất
 
 ```
 75578d5  feat: hoàn thành toàn bộ backend API — Sprint 1+2+3
 526253e  khởi tạo dự án tiendo: backend laravel + cấu trúc ban đầu
-b07e3df  sửa lỗi: đăng ký policy và fix các vấn đề từ code review
-5a9a0e5  tính năng: upload bản vẽ PDF + xử lý tạo tiles
-bf72389  feat: master layer CRUD
-d9c9adc  feat: reference implementation — auth + project CRUD
 ```
 
-*(Frontend chưa commit riêng — đang phát triển local)*
+*(Frontend + WSL scripts chưa commit — đang phát triển local)*
+
+---
+
+## 8. Việc còn lại
+
+| # | Việc | Trạng thái |
+|---|---|---|
+| 1 | E2E test thực tế trên browser (WSL) | ✅ Done — flow: login → tạo project → ML → upload PDF → ready → zone → status amber verified |
+| 2 | Stats bar "undefined%" bug | ✅ Fixed — field name mismatch `progress_pct`/`completed`/... đã khớp |
+| 3 | Brand design Ánh Dương (#FF7F29) | ✅ Done — Inter font, orange primary, header cam, cards, tabs, badges |
+| 4.5 | UI Redesign toàn bộ — Bento Box + Soft UI + Flat Design | ✅ Done — Lucide icons, Login/AppShell/ProjectList/ProjectDetail/CanvasEditor/Toolbar/ZoomControls/Notifications redesigned |
+| 4 | Comments/History/Notifications/AppShell bell | ✅ Done + verified đầy đủ |
+| 5 | Deploy VPS thực tế (cần có server + domain) | ⏳ Chờ server |
+| 6 | Certbot SSL | ⏳ Chờ domain |
+| 7 | Cron setup trên VPS (`* * * * * php artisan schedule:run`) | ⏳ Chờ server |
+| 8 | Git commit toàn bộ frontend (lint + build pass) | ⏳ Chưa commit |

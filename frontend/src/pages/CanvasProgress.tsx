@@ -633,6 +633,7 @@ export default function CanvasProgress() {
     }
   }
 
+  const [sidebarOpen, setSidebarOpen] = useState(false)
   const ownZones = zones.filter((z) => z.assigned_user_id === currentUserId)
 
   const layerReady = layer?.status === 'ready'
@@ -658,13 +659,22 @@ export default function CanvasProgress() {
           ← Dự án
         </Link>
         <span className="text-muted-foreground">/</span>
-        <span className="font-medium">{layer?.name ?? `Layer #${layerIdNum}`}</span>
-        <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">
-          Chế độ tiến độ
+        <span className="font-medium truncate">{layer?.name ?? `Layer #${layerIdNum}`}</span>
+        <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700 shrink-0">
+          Tiến độ
         </span>
-        <span className="ml-auto text-xs text-muted-foreground">
-          Khu vực của bạn: {ownZones.length}
-        </span>
+        <div className="ml-auto flex items-center gap-2 shrink-0">
+          <span className="hidden text-xs text-muted-foreground sm:inline">
+            {ownZones.length} khu vực
+          </span>
+          <button
+            type="button"
+            onClick={() => setSidebarOpen((o) => !o)}
+            className="rounded-md border px-2 py-1 text-xs lg:hidden"
+          >
+            {sidebarOpen ? '✕ Đóng' : '☰ Khu vực'}
+          </button>
+        </div>
       </div>
 
       {/* Main */}
@@ -721,8 +731,8 @@ export default function CanvasProgress() {
             </div>
           ) : null}
 
-          {/* Mark draw toolbar — top-left */}
-          <div className="absolute left-4 top-4 z-10 flex items-center gap-2">
+          {/* Mark draw toolbar — top-left. Tablet/mobile: KHÔNG vẽ mark theo SPEC */}
+          <div className="absolute left-4 top-4 z-10 hidden items-center gap-2 md:flex">
             {!isDrawingMark ? (
               <button
                 type="button"
@@ -811,8 +821,23 @@ export default function CanvasProgress() {
           </div>
         </div>
 
+        {/* Sidebar backdrop */}
+        {sidebarOpen ? (
+          <div
+            className="fixed inset-0 z-10 bg-black/40 lg:hidden"
+            onClick={() => setSidebarOpen(false)}
+          />
+        ) : null}
+
         {/* Sidebar — zone list (chỉ zone của mình) */}
-        <aside className="flex w-80 flex-col border-l bg-card">
+        <aside
+          className={[
+            'flex w-72 flex-col border-l bg-card',
+            'lg:relative lg:flex lg:w-80',
+            sidebarOpen ? 'fixed inset-y-0 right-0 z-20 flex' : 'hidden',
+          ].join(' ')}
+          style={sidebarOpen ? { top: 'calc(65px + 40px)' } : {}}
+        >
           <div className="border-b px-4 py-3">
             <p className="font-semibold">Khu vực của tôi</p>
             <p className="text-sm text-muted-foreground">{ownZones.length} khu vực được giao</p>

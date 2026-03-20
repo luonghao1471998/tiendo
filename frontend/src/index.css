@@ -1,3 +1,4 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 @import "@fontsource-variable/geist";
 @tailwind base;
 @tailwind components;
@@ -8,11 +9,21 @@
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  /* Ánh Dương brand tokens */
+  --color-primary:        #FF7F29;
+  --color-primary-hover:  #E5691D;
+  --color-primary-light:  #FFF3E8;
+  --color-surface:        #F8FAFC;
+  --color-border:         #E2E8F0;
+  --color-text:           #0F172A;
+  --color-text-secondary: #64748B;
 }
 
 body {
   margin: 0;
   min-height: 100vh;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 14px;
 }
 
 @layer base {
@@ -23,8 +34,10 @@ body {
     --card-foreground: oklch(0.145 0 0);
     --popover: oklch(1 0 0);
     --popover-foreground: oklch(0.145 0 0);
-    --primary: oklch(0.205 0 0);
-    --primary-foreground: oklch(0.985 0 0);
+    /* ── Ánh Dương orange as primary ── */
+    /* #FF7F29 ≈ hsl(24, 100%, 58%) */
+    --primary: 24 100% 58%;
+    --primary-foreground: 0 0% 100%;
     --secondary: oklch(0.97 0 0);
     --secondary-foreground: oklch(0.205 0 0);
     --muted: oklch(0.97 0 0);
@@ -34,7 +47,7 @@ body {
     --destructive: oklch(0.577 0.245 27.325);
     --border: oklch(0.922 0 0);
     --input: oklch(0.922 0 0);
-    --ring: oklch(0.708 0 0);
+    --ring: 24 100% 58%;
     --chart-1: oklch(0.809 0.105 251.813);
     --chart-2: oklch(0.623 0.214 259.815);
     --chart-3: oklch(0.546 0.245 262.881);
@@ -84,7 +97,7 @@ body {
     --sidebar-ring: oklch(0.556 0 0);
   }
   .theme {
-    --font-sans: 'Geist Variable', sans-serif;
+    --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   }
   * {
     @apply border-border outline-ring/50;

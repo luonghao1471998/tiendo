@@ -1,3 +1,5 @@
+import { MousePointer2, Pentagon, RectangleHorizontal } from 'lucide-react'
+
 export type CanvasDrawMode = 'select' | 'draw_polygon' | 'draw_rect'
 
 interface CanvasToolbarProps {
@@ -5,26 +7,34 @@ interface CanvasToolbarProps {
   onModeChange: (mode: CanvasDrawMode) => void
 }
 
-export default function CanvasToolbar({ mode, onModeChange }: CanvasToolbarProps) {
-  const btn = (m: CanvasDrawMode, label: string) => (
-    <button
-      key={m}
-      type="button"
-      onClick={() => onModeChange(m)}
-      className={`rounded px-3 py-1.5 text-xs font-medium transition ${
-        mode === m ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'
-      }`}
-    >
-      {label}
-    </button>
-  )
+type Tool = { mode: CanvasDrawMode; icon: React.ReactNode; label: string }
 
+const TOOLS: Tool[] = [
+  { mode: 'select', icon: <MousePointer2 size={16} />, label: 'Chọn' },
+  { mode: 'draw_polygon', icon: <Pentagon size={16} />, label: 'Đa giác' },
+  { mode: 'draw_rect', icon: <RectangleHorizontal size={16} />, label: 'Chữ nhật' },
+]
+
+export default function CanvasToolbar({ mode, onModeChange }: CanvasToolbarProps) {
   return (
-    <div className="flex items-center gap-1 rounded-lg border bg-background/90 p-1 shadow-md backdrop-blur-sm">
-      {btn('select', '↖ Chọn')}
-      <div className="mx-1 h-4 w-px bg-border" />
-      {btn('draw_polygon', '⬡ Đa giác')}
-      {btn('draw_rect', '▭ Chữ nhật')}
+    <div className="flex items-center gap-1 rounded-xl border border-[#E2E8F0] bg-white p-1 shadow-md">
+      {TOOLS.map((tool, idx) => (
+        <div key={tool.mode} className="flex items-center">
+          {idx === 1 ? <div className="mx-0.5 h-5 w-px bg-[#E2E8F0]" /> : null}
+          <button
+            type="button"
+            onClick={() => onModeChange(tool.mode)}
+            title={tool.label}
+            className={`flex h-9 w-9 cursor-pointer items-center justify-center rounded-lg transition-all duration-150 ${
+              mode === tool.mode
+                ? 'bg-[#FFF3E8] text-[#FF7F29]'
+                : 'text-[#64748B] hover:bg-[#F8FAFC] hover:text-[#0F172A]'
+            }`}
+          >
+            {tool.icon}
+          </button>
+        </div>
+      ))}
     </div>
   )
 }

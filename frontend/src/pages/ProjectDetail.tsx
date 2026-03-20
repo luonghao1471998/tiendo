@@ -1,19 +1,24 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
+import {
+  AlertTriangle, Building2, CheckCircle2, ChevronLeft,
+  HardHat, Layers, MapPin, PauseCircle, TrendingUp,
+} from 'lucide-react'
 
 import client from '@/api/client'
 import useAuthStore from '@/stores/authStore'
+import useCanvasStore from '@/stores/canvasStore'
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 type ProjectStats = {
   total_zones: number
-  done_zones: number
-  in_progress_zones: number
-  delayed_zones: number
-  not_started_zones: number
-  paused_zones: number
-  completion_pct: number
+  not_started: number
+  in_progress: number
+  completed: number
+  delayed: number
+  paused: number
+  progress_pct: number
 }
 
 type ProjectData = {
@@ -103,11 +108,27 @@ function resolveProjectRole(
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-function Stat({ label, value }: { label: string; value: number | string }) {
+type StatItem = {
+  label: string
+  value: number | string
+  icon: React.ReactNode
+  highlight?: boolean
+}
+
+function Stat({ label, value, icon, highlight }: StatItem) {
   return (
-    <div className="rounded-lg border bg-background px-4 py-3">
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="text-xl font-semibold">{value}</p>
+    <div className={`flex flex-col gap-2 rounded-2xl border p-4 transition-all ${
+      highlight
+        ? 'border-[#FF7F29]/30 bg-[#FFF3E8]'
+        : 'border-[#E2E8F0] bg-[#F8FAFC]'
+    }`}>
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-medium text-[#64748B]">{label}</p>
+        <span className={highlight ? 'text-[#FF7F29]' : 'text-[#94A3B8]'}>{icon}</span>
+      </div>
+      <p className={`text-2xl font-bold leading-none ${highlight ? 'text-[#FF7F29]' : 'text-[#0F172A]'}`}>
+        {value}
+      </p>
     </div>
   )
 }
@@ -115,8 +136,10 @@ function Stat({ label, value }: { label: string; value: number | string }) {
 function TabButton({ active, onClick, label }: { active: boolean; onClick: () => void; label: string }) {
   return (
     <button
-      className={`rounded-md px-3 py-2 text-sm transition ${
-        active ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+      className={`cursor-pointer border-b-2 px-4 py-2.5 text-sm font-medium transition-all duration-150 ${
+        active
+          ? 'border-[#FF7F29] text-[#FF7F29]'
+          : 'border-transparent text-[#64748B] hover:text-[#0F172A]'
       }`}
       onClick={onClick}
       type="button"
@@ -354,6 +377,7 @@ function LayersTab({
   const canManage = projectRole === 'admin' || projectRole === 'project_manager'
   const [showCreateML, setShowCreateML] = useState(false)
   const [showUploadLayer, setShowUploadLayer] = useState(false)
+  const [importingLayerId, setImportingLayerId] = useState<number | null>(null)
 
   const handleCreateML = async (name: string, code: string, sortOrder: number) => {
     await onCreateMasterLayer(name, code, sortOrder)
@@ -460,13 +484,13 @@ function LayersTab({
 
           {!layersLoading &&
             layers.map((layer) => (
-              <div key={layer.id} className="rounded-lg border p-4">
+              <div key={layer.id} className="rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] p-4">
                 <div className="mb-3 flex items-start justify-between gap-2">
                   <div>
-                    <p className="font-semibold">{layer.name}</p>
-                    <p className="mt-0.5 text-xs text-muted-foreground">
+                    <p className="font-semibold text-[#0F172A]">{layer.name}</p>
+                    <p className="mt-0.5 text-xs text-[#64748B]">
                       {layer.code} ·{' '}
-                      <span className="rounded bg-muted px-1.5 py-0.5">
+                      <span className="rounded bg-white px-1.5 py-0.5 border border-[#E2E8F0]">
                         {LAYER_TYPE_LABELS[layer.type] ?? layer.type}
                       </span>
                     </p>
@@ -529,6 +553,17 @@ function LayersTab({
                     </button>
                   ) : null}
 
+                  {/* Import Excel — only ready layers, PM/admin */}
+                  {layer.status === 'ready' && canManage ? (
+                    <button
+                      type="button"
+                      onClick={() => setImportingLayerId(layer.id)}
+                      className="rounded-md border border-emerald-300 px-3 py-1.5 text-sm text-emerald-700 hover:bg-emerald-50"
+                    >
+                      ⬆ Nhập Excel
+                    </button>
+                  ) : null}
+
                   {/* Delete */}
                   {canManage ? (
                     <button
@@ -543,6 +578,15 @@ function LayersTab({
                 </div>
               </div>
             ))}
+
+          {/* Excel Import Modal */}
+          {importingLayerId ? (
+            <ExcelImportModal
+              layerId={importingLayerId}
+              layerName={layers.find((l) => l.id === importingLayerId)?.name ?? `Layer #${importingLayerId}`}
+              onClose={() => setImportingLayerId(null)}
+            />
+          ) : null}
         </div>
       )}
     </div>
@@ -704,23 +748,648 @@ function MembersTab({
   )
 }
 
+// ─── ExcelImportModal ──────────────────────────────────────────────────────────
+
+type PreviewRow = {
+  row: number
+  zone_code: string
+  found: boolean
+  match_type: string | null
+  current_status: string | null
+  new_status: string | null
+  completion_pct: number | null
+  deadline: string | null
+  notes: string | null
+}
+
+type ExcelImportResult = {
+  id: number
+  status: string
+  preview_data: PreviewRow[] | null
+}
+
+type ApplyResult = {
+  success_count: number
+  not_found_count: number
+  errors: string[]
+}
+
+const STATUS_VI: Record<string, string> = {
+  not_started: 'Chưa bắt đầu',
+  in_progress: 'Đang thi công',
+  completed: 'Hoàn thành',
+  delayed: 'Trễ',
+  paused: 'Tạm dừng',
+}
+
+function ExcelImportModal({
+  layerId,
+  layerName,
+  onClose,
+}: {
+  layerId: number
+  layerName: string
+  onClose: () => void
+}) {
+  type Stage = 'upload' | 'preview' | 'applied'
+  const [stage, setStage] = useState<Stage>('upload')
+  const [file, setFile] = useState<File | null>(null)
+  const [uploading, setUploading] = useState(false)
+  const [applying, setApplying] = useState(false)
+  const [importJob, setImportJob] = useState<ExcelImportResult | null>(null)
+  const [applyResult, setApplyResult] = useState<ApplyResult | null>(null)
+  const [err, setErr] = useState<string | null>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
+  const { fetchZonesAndMarks } = useCanvasStore()
+
+  const upload = async () => {
+    if (!file) return
+    if (!file.name.match(/\.(xlsx|xls)$/i)) {
+      setErr('Chỉ chấp nhận file .xlsx hoặc .xls.')
+      return
+    }
+    setUploading(true); setErr(null)
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      const resp = (await client.post(`/layers/${layerId}/import`, fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })) as { data: ApiResponse<ExcelImportResult> }
+      setImportJob(resp.data.data)
+      setStage('preview')
+    } catch (e) {
+      setErr(parseApiError(e, 'Upload thất bại.'))
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  const apply = async () => {
+    if (!importJob) return
+    setApplying(true); setErr(null)
+    try {
+      const resp = (await client.post(`/excel-imports/${importJob.id}/apply`)) as {
+        data: ApiResponse<ApplyResult>
+      }
+      setApplyResult(resp.data.data)
+      setStage('applied')
+    } catch (e) {
+      setErr(parseApiError(e, 'Áp dụng thất bại.'))
+    } finally {
+      setApplying(false)
+    }
+  }
+
+  const preview = importJob?.preview_data ?? []
+  const foundRows = preview.filter((r) => r.found)
+  const notFoundRows = preview.filter((r) => !r.found)
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4">
+      <div className="flex w-full max-w-3xl flex-col rounded-xl border bg-card shadow-2xl"
+        style={{ maxHeight: '90vh' }}>
+        {/* Header */}
+        <div className="flex items-center justify-between border-b px-5 py-4">
+          <div>
+            <h2 className="font-semibold">Nhập Excel</h2>
+            <p className="text-xs text-muted-foreground">{layerName}</p>
+          </div>
+          <button type="button" onClick={onClose}
+            className="rounded-md p-1 text-muted-foreground hover:bg-muted">
+            ✕
+          </button>
+        </div>
+
+        {/* Steps indicator */}
+        <div className="flex border-b text-xs">
+          {(['upload', 'preview', 'applied'] as Stage[]).map((s, i) => (
+            <div key={s}
+              className={`flex-1 py-2.5 text-center font-medium ${stage === s ? 'border-b-2 border-primary text-primary' : 'text-muted-foreground'}`}>
+              {i + 1}. {s === 'upload' ? 'Chọn file' : s === 'preview' ? 'Xem trước' : 'Hoàn tất'}
+            </div>
+          ))}
+        </div>
+
+        {/* Body */}
+        <div className="min-h-0 flex-1 overflow-y-auto p-5">
+
+          {/* ── Stage 1: Upload ── */}
+          {stage === 'upload' ? (
+            <div className="space-y-4">
+              <div className="rounded-lg border-2 border-dashed p-6 text-center">
+                <p className="mb-3 text-sm font-medium">Chọn file Excel (.xlsx)</p>
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept=".xlsx,.xls"
+                  className="hidden"
+                  onChange={(e) => { setFile(e.target.files?.[0] ?? null); setErr(null) }}
+                />
+                <button
+                  type="button"
+                  onClick={() => fileRef.current?.click()}
+                  className="rounded-md border px-4 py-2 text-sm hover:bg-muted"
+                >
+                  📂 Chọn file
+                </button>
+                {file ? (
+                  <p className="mt-2 text-sm font-medium text-emerald-600">✓ {file.name}</p>
+                ) : null}
+              </div>
+
+              {/* Format hint */}
+              <div className="rounded-lg border bg-muted/30 p-4 text-xs text-muted-foreground space-y-1">
+                <p className="font-medium text-foreground mb-1">Định dạng template chuẩn:</p>
+                <p>Cột 1: Mã khu vực (zone_code) — dùng để khớp zone</p>
+                <p>Cột 3: Trạng thái (not_started / in_progress / completed / delayed / paused)</p>
+                <p>Cột 4: Tiến độ (%) — số từ 0–100</p>
+                <p>Cột 6: Deadline — định dạng YYYY-MM-DD</p>
+                <p>Cột 8: Ghi chú</p>
+                <p className="mt-2 text-amber-600 font-medium">
+                  ⚠ Chỉ cập nhật zone đã có — KHÔNG tạo zone mới từ Excel.
+                </p>
+              </div>
+
+              {err ? <p className="text-sm text-red-600">{err}</p> : null}
+            </div>
+          ) : null}
+
+          {/* ── Stage 2: Preview ── */}
+          {stage === 'preview' ? (
+            <div className="space-y-4">
+              {/* Summary chips */}
+              <div className="flex flex-wrap gap-3 text-sm">
+                <span className="rounded-full bg-emerald-100 px-3 py-1 font-medium text-emerald-700">
+                  ✓ Tìm thấy: {foundRows.length} zone
+                </span>
+                {notFoundRows.length > 0 ? (
+                  <span className="rounded-full bg-amber-100 px-3 py-1 font-medium text-amber-700">
+                    ⚠ Không tìm thấy: {notFoundRows.length} dòng
+                  </span>
+                ) : null}
+              </div>
+
+              {/* Preview table */}
+              <div className="overflow-x-auto rounded-lg border text-xs">
+                <table className="min-w-full">
+                  <thead className="bg-muted/40 text-left">
+                    <tr>
+                      <th className="px-3 py-2 font-medium">Dòng</th>
+                      <th className="px-3 py-2 font-medium">Mã khu vực</th>
+                      <th className="px-3 py-2 font-medium">Trạng thái cũ</th>
+                      <th className="px-3 py-2 font-medium">Trạng thái mới</th>
+                      <th className="px-3 py-2 font-medium">Tiến độ</th>
+                      <th className="px-3 py-2 font-medium">Deadline</th>
+                      <th className="px-3 py-2 font-medium">Ghi chú</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {preview.map((row) => (
+                      <tr key={row.row}
+                        className={`border-t ${row.found ? 'hover:bg-muted/20' : 'bg-amber-50 text-amber-800'}`}>
+                        <td className="px-3 py-2 text-muted-foreground">{row.row}</td>
+                        <td className="px-3 py-2 font-mono font-medium">{row.zone_code}</td>
+                        <td className="px-3 py-2">
+                          {row.found
+                            ? (STATUS_VI[row.current_status ?? ''] ?? row.current_status ?? '—')
+                            : <span className="text-amber-600 font-medium">Không tìm thấy</span>}
+                        </td>
+                        <td className="px-3 py-2">
+                          {row.found && row.new_status
+                            ? STATUS_VI[row.new_status] ?? row.new_status
+                            : '—'}
+                        </td>
+                        <td className="px-3 py-2">{row.completion_pct != null ? `${row.completion_pct}%` : '—'}</td>
+                        <td className="px-3 py-2">{row.deadline ?? '—'}</td>
+                        <td className="px-3 py-2 max-w-[120px] truncate">{row.notes ?? '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {foundRows.length === 0 ? (
+                <p className="text-sm text-amber-700 font-medium">
+                  ⚠ Không có zone nào khớp với file Excel. Kiểm tra lại cột mã khu vực.
+                </p>
+              ) : null}
+
+              {err ? <p className="text-sm text-red-600">{err}</p> : null}
+            </div>
+          ) : null}
+
+          {/* ── Stage 3: Applied ── */}
+          {stage === 'applied' && applyResult ? (
+            <div className="space-y-4 py-4 text-center">
+              <div className="text-5xl">✅</div>
+              <p className="text-lg font-semibold">Áp dụng thành công!</p>
+              <div className="flex justify-center gap-6 text-sm">
+                <div className="rounded-lg border bg-emerald-50 px-6 py-4">
+                  <p className="text-2xl font-bold text-emerald-600">{applyResult.success_count}</p>
+                  <p className="text-muted-foreground">zone đã cập nhật</p>
+                </div>
+                {applyResult.not_found_count > 0 ? (
+                  <div className="rounded-lg border bg-amber-50 px-6 py-4">
+                    <p className="text-2xl font-bold text-amber-600">{applyResult.not_found_count}</p>
+                    <p className="text-muted-foreground">zone không tìm thấy</p>
+                  </div>
+                ) : null}
+              </div>
+              {applyResult.errors.length > 0 ? (
+                <div className="rounded-lg border bg-red-50 p-3 text-left text-xs text-red-700">
+                  <p className="font-medium mb-1">Lỗi chi tiết:</p>
+                  <ul className="space-y-0.5">
+                    {applyResult.errors.map((e, i) => <li key={i}>• {e}</li>)}
+                  </ul>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+
+        {/* Footer actions */}
+        <div className="flex justify-end gap-2 border-t px-5 py-4">
+          {stage === 'upload' ? (
+            <>
+              <button type="button" onClick={onClose}
+                className="rounded-md border px-4 py-2 text-sm">
+                Hủy
+              </button>
+              <button
+                type="button"
+                onClick={() => void upload()}
+                disabled={!file || uploading}
+                className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground disabled:opacity-60"
+              >
+                {uploading ? 'Đang phân tích...' : 'Phân tích file →'}
+              </button>
+            </>
+          ) : null}
+
+          {stage === 'preview' ? (
+            <>
+              <button type="button"
+                onClick={() => { setStage('upload'); setImportJob(null); setFile(null) }}
+                className="rounded-md border px-4 py-2 text-sm">
+                ← Chọn lại file
+              </button>
+              <button
+                type="button"
+                onClick={() => void apply()}
+                disabled={applying || foundRows.length === 0}
+                className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground disabled:opacity-60"
+              >
+                {applying ? 'Đang áp dụng...' : `Áp dụng ${foundRows.length} zone →`}
+              </button>
+            </>
+          ) : null}
+
+          {stage === 'applied' ? (
+            <button
+              type="button"
+              onClick={() => {
+                void fetchZonesAndMarks(layerId)
+                onClose()
+              }}
+              className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground"
+            >
+              Đóng
+            </button>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── ExportButton ──────────────────────────────────────────────────────────────
+
+function ExportButton({ projectId }: { projectId: number }) {
+  const [exporting, setExporting] = useState(false)
+  const [exportErr, setExportErr] = useState<string | null>(null)
+
+  const doExport = async () => {
+    setExporting(true); setExportErr(null)
+    try {
+      const resp = await client.get(`/projects/${projectId}/export/excel`, {
+        responseType: 'blob',
+      })
+      const blob = new Blob([(resp as { data: BlobPart }).data], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `project-${projectId}-export.xlsx`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+    } catch {
+      setExportErr('Xuất thất bại. Vui lòng thử lại.')
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  return (
+    <div className="space-y-1">
+      <button
+        type="button"
+        onClick={() => void doExport()}
+        disabled={exporting}
+        className="inline-flex items-center gap-2 rounded-md border bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-100 disabled:opacity-60"
+      >
+        {exporting ? '⏳ Đang xuất...' : '⬇ Xuất Excel toàn dự án'}
+      </button>
+      {exportErr ? <p className="text-xs text-red-600">{exportErr}</p> : null}
+    </div>
+  )
+}
+
 // ─── SettingsTab ───────────────────────────────────────────────────────────────
 
-function SettingsTab({ projectId }: { projectId: number }) {
+type ShareLink = {
+  id: number
+  token: string
+  role: string
+  expires_at: string | null
+  revoked_at: string | null
+  created_at: string
+}
+
+
+function SettingsTab({
+  project,
+  projectRole,
+  onProjectUpdate,
+}: {
+  project: ProjectData
+  projectRole: 'admin' | 'project_manager' | 'field_team' | 'viewer' | null
+  onProjectUpdate: (updated: ProjectData) => void
+}) {
+  const canManage = projectRole === 'admin' || projectRole === 'project_manager'
+
+  // ── Edit project state ───────────────────────────────────────────────────
+  const [editName, setEditName] = useState(project.name)
+  const [editDescription, setEditDescription] = useState(project.description ?? '')
+  const [editAddress, setEditAddress] = useState(project.address ?? '')
+  const [saving, setSaving] = useState(false)
+  const [saveErr, setSaveErr] = useState<string | null>(null)
+  const [saveOk, setSaveOk] = useState(false)
+
+  const saveProject = async () => {
+    if (!editName.trim()) { setSaveErr('Tên dự án là bắt buộc.'); return }
+    setSaving(true); setSaveErr(null); setSaveOk(false)
+    try {
+      const resp = (await client.put(`/projects/${project.id}`, {
+        name: editName.trim(),
+        description: editDescription.trim() || null,
+        address: editAddress.trim() || null,
+      })) as { data: ApiResponse<ProjectData> }
+      onProjectUpdate(resp.data.data)
+      setSaveOk(true)
+      setTimeout(() => setSaveOk(false), 3000)
+    } catch (e) {
+      setSaveErr(parseApiError(e, 'Lưu thất bại.'))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  // ── Share links state ────────────────────────────────────────────────────
+  const [shareLinks, setShareLinks] = useState<ShareLink[]>([])
+  const [shareLoading, setShareLoading] = useState(true)
+  const [creating, setCreating] = useState(false)
+  const [expiresDays, setExpiresDays] = useState<1 | 7 | 30>(7)
+  const [shareErr, setShareErr] = useState<string | null>(null)
+  const [copiedId, setCopiedId] = useState<number | null>(null)
+
+  useEffect(() => {
+    setShareLoading(true)
+    void (client.get(`/projects/${project.id}/share-links`) as Promise<{ data: ApiResponse<ShareLink[]> }>)
+      .then((r) => setShareLinks(r.data.data ?? []))
+      .catch(() => setShareErr('Không tải được share links.'))
+      .finally(() => setShareLoading(false))
+  }, [project.id])
+
+  const createLink = async () => {
+    setCreating(true); setShareErr(null)
+    try {
+      const resp = (await client.post(`/projects/${project.id}/share-links`, {
+        expires_in_days: expiresDays,
+      })) as { data: ApiResponse<ShareLink> }
+      setShareLinks((prev) => [resp.data.data, ...prev])
+    } catch (e) {
+      setShareErr(parseApiError(e, 'Tạo link thất bại.'))
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  const revokeLink = async (linkId: number) => {
+    if (!confirm('Thu hồi link này? Người xem sẽ không truy cập được nữa.')) return
+    try {
+      await client.delete(`/share-links/${linkId}`)
+      setShareLinks((prev) =>
+        prev.map((l) => (l.id === linkId ? { ...l, revoked_at: new Date().toISOString() } : l)),
+      )
+    } catch (e) {
+      setShareErr(parseApiError(e, 'Thu hồi thất bại.'))
+    }
+  }
+
+  const copyLink = async (token: string, linkId: number) => {
+    const url = `${window.location.origin}/share/${token}`
+    try {
+      await navigator.clipboard.writeText(url)
+      setCopiedId(linkId)
+      setTimeout(() => setCopiedId(null), 2000)
+    } catch {
+      prompt('Copy link:', url)
+    }
+  }
+
+  const isActive = (link: ShareLink) => {
+    if (link.revoked_at) return false
+    if (!link.expires_at) return true
+    return new Date(link.expires_at) > new Date()
+  }
+
+  const fmtDate = (iso: string | null) =>
+    iso
+      ? new Date(iso).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' })
+      : '—'
+
   return (
-    <div className="space-y-4">
-      <h3 className="text-base font-semibold">Cài đặt dự án</h3>
-      <p className="text-sm text-muted-foreground">
-        Export toàn bộ dự án ra Excel hoặc quản lý share link.
-      </p>
-      <a
-        href={`${(import.meta.env.VITE_API_BASE_URL as string | undefined) ?? '/api/v1'}/projects/${projectId}/export/excel`}
-        target="_blank"
-        rel="noreferrer"
-        className="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm hover:bg-muted"
-      >
-        ⬇ Export Excel toàn dự án
-      </a>
+    <div className="space-y-8 max-w-2xl">
+
+      {/* ── Edit project info ─────────────────────────────────────────── */}
+      <section className="space-y-4">
+        <h3 className="text-base font-semibold">Thông tin dự án</h3>
+
+        {canManage ? (
+          <div className="space-y-3">
+            <div>
+              <label className="mb-1 block text-xs font-medium">
+                Tên dự án <span className="text-red-500">*</span>
+              </label>
+              <input
+                className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium">Mô tả</label>
+              <textarea
+                className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+                rows={2}
+                value={editDescription}
+                onChange={(e) => setEditDescription(e.target.value)}
+                placeholder="Mô tả dự án (tuỳ chọn)"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium">Địa chỉ công trình</label>
+              <input
+                className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+                value={editAddress}
+                onChange={(e) => setEditAddress(e.target.value)}
+                placeholder="VD: 123 Nguyễn Huệ, Q1, TP.HCM"
+              />
+            </div>
+
+            {saveErr ? <p className="text-xs text-red-600">{saveErr}</p> : null}
+            {saveOk ? <p className="text-xs text-emerald-600">✓ Đã lưu thành công.</p> : null}
+
+            <button
+              type="button"
+              onClick={() => void saveProject()}
+              disabled={saving}
+              className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground disabled:opacity-60"
+            >
+              {saving ? 'Đang lưu...' : 'Lưu thay đổi'}
+            </button>
+          </div>
+        ) : (
+          <div className="rounded-lg border bg-muted/30 p-4 text-sm space-y-1">
+            <p><span className="font-medium">Tên:</span> {project.name}</p>
+            {project.description ? <p><span className="font-medium">Mô tả:</span> {project.description}</p> : null}
+            {project.address ? <p><span className="font-medium">Địa chỉ:</span> {project.address}</p> : null}
+          </div>
+        )}
+      </section>
+
+      {/* ── Export ──────────────────────────────────────────────────────── */}
+      <section className="space-y-3">
+        <h3 className="text-base font-semibold">Xuất dữ liệu</h3>
+        <ExportButton projectId={project.id} />
+        <p className="text-xs text-muted-foreground">
+          Xuất toàn bộ mặt bằng, khu vực và tiến độ ra file .xlsx.
+        </p>
+      </section>
+
+      {/* ── Share Links ──────────────────────────────────────────────────── */}
+      <section className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="text-base font-semibold">Link chia sẻ</h3>
+          <span className="text-xs text-muted-foreground">Người xem không cần đăng nhập</span>
+        </div>
+
+        {shareErr ? (
+          <p className="text-xs text-red-600">{shareErr}</p>
+        ) : null}
+
+        {/* Create new link */}
+        {canManage ? (
+          <div className="flex items-center gap-2 rounded-lg border bg-muted/30 p-3">
+            <span className="text-xs font-medium text-muted-foreground shrink-0">Hết hạn sau</span>
+            <select
+              value={expiresDays}
+              onChange={(e) => setExpiresDays(Number(e.target.value) as 1 | 7 | 30)}
+              className="rounded-md border bg-background px-2 py-1 text-sm"
+            >
+              <option value={1}>1 ngày</option>
+              <option value={7}>7 ngày</option>
+              <option value={30}>30 ngày</option>
+            </select>
+            <button
+              type="button"
+              onClick={() => void createLink()}
+              disabled={creating}
+              className="ml-auto rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground disabled:opacity-60"
+            >
+              {creating ? 'Đang tạo...' : '+ Tạo link mới'}
+            </button>
+          </div>
+        ) : null}
+
+        {/* Links list */}
+        {shareLoading ? (
+          <p className="text-sm text-muted-foreground">Đang tải...</p>
+        ) : shareLinks.length === 0 ? (
+          <p className="text-sm text-muted-foreground">Chưa có link nào được tạo.</p>
+        ) : (
+          <ul className="space-y-2">
+            {shareLinks.map((link) => {
+              const active = isActive(link)
+              return (
+                <li
+                  key={link.id}
+                  className={`rounded-lg border p-3 ${active ? 'bg-card' : 'bg-muted/30 opacity-60'}`}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1 space-y-1">
+                      {/* Token (truncated) */}
+                      <p className="font-mono text-xs text-muted-foreground truncate">
+                        /share/{link.token}
+                      </p>
+                      {/* Meta */}
+                      <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
+                        <span>
+                          {active ? (
+                            <span className="text-emerald-600 font-medium">● Còn hiệu lực</span>
+                          ) : link.revoked_at ? (
+                            <span className="text-red-500">✕ Đã thu hồi</span>
+                          ) : (
+                            <span className="text-amber-600">⚠ Hết hạn</span>
+                          )}
+                        </span>
+                        <span>Vai trò: <strong>Xem</strong></span>
+                        {link.expires_at ? <span>Hết hạn: {fmtDate(link.expires_at)}</span> : null}
+                        <span>Tạo: {fmtDate(link.created_at)}</span>
+                      </div>
+                    </div>
+
+                    {/* Actions */}
+                    <div className="flex shrink-0 gap-2">
+                      {active ? (
+                        <button
+                          type="button"
+                          onClick={() => void copyLink(link.token, link.id)}
+                          className="rounded-md border px-2.5 py-1 text-xs hover:bg-muted"
+                        >
+                          {copiedId === link.id ? '✓ Đã copy' : '📋 Copy'}
+                        </button>
+                      ) : null}
+                      {canManage && active ? (
+                        <button
+                          type="button"
+                          onClick={() => void revokeLink(link.id)}
+                          className="rounded-md border border-red-200 px-2.5 py-1 text-xs text-red-600 hover:bg-red-50"
+                        >
+                          Thu hồi
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                </li>
+              )
+            })}
+          </ul>
+        )}
+      </section>
     </div>
   )
 }
@@ -966,45 +1635,83 @@ export default function ProjectDetail() {
   // ── Render ─────────────────────────────────────────────────────────────
 
   return (
-    <main className="mx-auto w-full max-w-6xl px-6 py-8">
+    <main className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 sm:py-8">
       <div className="mb-6">
-        <Link to="/projects" className="text-sm text-muted-foreground hover:underline">
-          ← Quay lại danh sách dự án
+        <Link
+          to="/projects"
+          className="inline-flex cursor-pointer items-center gap-1.5 text-sm text-[#64748B] transition hover:text-[#0F172A]"
+        >
+          <ChevronLeft size={16} />
+          Danh sách dự án
         </Link>
       </div>
 
-      {loading ? <p className="text-sm text-muted-foreground">Đang tải dữ liệu...</p> : null}
-      {error ? <p className="text-sm text-red-600">{error}</p> : null}
+      {loading ? (
+        <div className="space-y-4">
+          <div className="h-8 w-64 animate-pulse rounded-xl bg-[#F1F5F9]" />
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+            {[1,2,3,4,5,6].map((i) => (
+              <div key={i} className="h-20 animate-pulse rounded-2xl bg-[#F1F5F9]" />
+            ))}
+          </div>
+        </div>
+      ) : null}
+      {error ? (
+        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
+      ) : null}
 
       {!loading && !error && project ? (
-        <section className="space-y-6 rounded-xl border bg-card p-6">
+        <section className="space-y-6 rounded-2xl border border-[#E2E8F0] bg-white p-6 shadow-sm">
           {/* Project header */}
-          <div>
-            <p className="text-xs uppercase tracking-wide text-muted-foreground">{project.code}</p>
-            <h1 className="mt-1 text-2xl font-semibold">{project.name}</h1>
-            {project.description ? (
-              <p className="mt-1 text-sm text-muted-foreground">{project.description}</p>
-            ) : null}
-            {project.address ? (
-              <p className="mt-0.5 text-sm text-muted-foreground">📍 {project.address}</p>
-            ) : null}
+          <div className="flex items-start gap-4">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-[#FFF3E8]">
+              <Building2 size={22} className="text-[#FF7F29]" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="inline-flex items-center rounded-full bg-[#FFF3E8] px-2.5 py-0.5 font-mono text-xs font-semibold text-[#FF7F29]">
+                  {project.code}
+                </span>
+              </div>
+              <h1 className="mt-1 text-xl font-bold text-[#0F172A]">{project.name}</h1>
+              {project.description ? (
+                <p className="mt-0.5 text-sm text-[#64748B]">{project.description}</p>
+              ) : null}
+              {project.address ? (
+                <div className="mt-1 flex items-center gap-1.5 text-sm text-[#94A3B8]">
+                  <MapPin size={13} />
+                  <span>{project.address}</span>
+                </div>
+              ) : null}
+            </div>
           </div>
 
-          {/* Stats */}
+          {/* Stats — Bento Grid */}
           {project.stats ? (
-            <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
-              <Stat label="Tổng zone" value={project.stats.total_zones} />
-              <Stat label="Hoàn thành" value={project.stats.done_zones} />
-              <Stat label="Đang thi công" value={project.stats.in_progress_zones} />
-              <Stat label="Trì hoãn" value={project.stats.delayed_zones} />
-              <Stat label="Tạm dừng" value={project.stats.paused_zones} />
-              <Stat label="Tiến độ" value={`${project.stats.completion_pct}%`} />
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+              <Stat label="Tổng zone" value={project.stats.total_zones ?? 0}
+                icon={<Layers size={16} />} />
+              <Stat label="Hoàn thành" value={project.stats.completed ?? 0}
+                icon={<CheckCircle2 size={16} />} />
+              <Stat label="Đang thi công" value={project.stats.in_progress ?? 0}
+                icon={<HardHat size={16} />} />
+              <Stat label="Trì hoãn" value={project.stats.delayed ?? 0}
+                icon={<AlertTriangle size={16} />} />
+              <Stat label="Tạm dừng" value={project.stats.paused ?? 0}
+                icon={<PauseCircle size={16} />} />
+              <Stat
+                label="Tiến độ"
+                value={`${Math.round(project.stats.progress_pct ?? 0)}%`}
+                icon={<TrendingUp size={16} />}
+                highlight
+              />
             </div>
           ) : null}
 
           {/* Tabs */}
           <div className="border-t pt-5">
-            <div className="mb-4 flex flex-wrap gap-2 border-b pb-3">
+            {/* Scrollable tabs on mobile */}
+            <div className="mb-4 flex gap-2 overflow-x-auto border-b pb-3 scrollbar-none [-ms-overflow-style:none] [scrollbar-width:none]">
               <TabButton active={activeTab === 'layers'} onClick={() => setSearchParams({ tab: 'layers' })} label="Mặt bằng" />
               <TabButton active={activeTab === 'members'} onClick={() => setSearchParams({ tab: 'members' })} label="Thành viên" />
               <TabButton active={activeTab === 'settings'} onClick={() => setSearchParams({ tab: 'settings' })} label="Cài đặt" />
@@ -1044,7 +1751,13 @@ export default function ProjectDetail() {
               />
             ) : null}
 
-            {activeTab === 'settings' ? <SettingsTab projectId={project.id} /> : null}
+            {activeTab === 'settings' ? (
+              <SettingsTab
+                project={project}
+                projectRole={projectRole}
+                onProjectUpdate={(updated) => setProject((prev) => (prev ? { ...prev, ...updated } : prev))}
+              />
+            ) : null}
           </div>
         </section>
       ) : null}

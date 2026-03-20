@@ -122,6 +122,34 @@ type ListResponse<T> = {
   data: T[]
 }
 
+// ─── Geometry normalizer ─────────────────────────────────────────────────────
+// API trả về points dạng {x,y}[] — convert sang [x,y][] cho PolygonLayer
+type ApiPoint = { x: number; y: number } | [number, number]
+
+function normalizePoint(p: ApiPoint): [number, number] {
+  if (Array.isArray(p)) return p
+  return [p.x, p.y]
+}
+
+function normalizeGeometry(geo: Geometry | null | undefined): Geometry {
+  if (!geo) return { type: 'polygon', points: [] }
+  if (geo.type === 'polygon' && geo.points) {
+    return {
+      ...geo,
+      points: (geo.points as unknown as ApiPoint[]).map(normalizePoint),
+    }
+  }
+  return geo
+}
+
+function normalizeZone(z: Zone): Zone {
+  return { ...z, geometry_pct: normalizeGeometry(z.geometry_pct) }
+}
+
+function normalizeMark(m: Mark): Mark {
+  return { ...m, geometry_pct: normalizeGeometry(m.geometry_pct) }
+}
+
 const useCanvasStore = create<CanvasState & CanvasActions>((set, get) => ({
   ...INITIAL_STATE,
 
@@ -133,13 +161,13 @@ const useCanvasStore = create<CanvasState & CanvasActions>((set, get) => ({
       Promise.resolve(null),
     ]))
 
-    const zones: Zone[] = zonesResp.data.data ?? []
+    const zones: Zone[] = (zonesResp.data.data ?? []).map(normalizeZone)
 
     // fetch marks for each zone in parallel (flatten)
     const markArrays = await Promise.all(
       zones.map((z) =>
         (client.get(`/zones/${z.id}/marks`) as Promise<{ data: ListResponse<Mark> }>)
-          .then((r) => r.data.data)
+          .then((r) => r.data.data.map(normalizeMark))
           .catch(() => [] as Mark[]),
       ),
     )
@@ -169,7 +197,7 @@ const useCanvasStore = create<CanvasState & CanvasActions>((set, get) => ({
       set((state) => {
         // apply zone updates
         let zones = [...state.zones]
-        for (const z of payload.zones) {
+        for (const z of payload.zones.map(normalizeZone)) {
           const idx = zones.findIndex((x) => x.id === z.id)
           if (idx >= 0) zones[idx] = z
           else zones.push(z)
@@ -178,7 +206,7 @@ const useCanvasStore = create<CanvasState & CanvasActions>((set, get) => ({
 
         // apply mark updates
         let marks = [...state.marks]
-        for (const m of payload.marks) {
+        for (const m of payload.marks.map(normalizeMark)) {
           const idx = marks.findIndex((x) => x.id === m.id)
           if (idx >= 0) marks[idx] = m
           else marks.push(m)
@@ -205,9 +233,9 @@ const useCanvasStore = create<CanvasState & CanvasActions>((set, get) => ({
   setPan: (x, y) => set({ panX: x, panY: y }),
   resetViewport: () => set({ zoom: 1, panX: 0, panY: 0 }),
 
-  addZone: (zone) => set((state) => ({ zones: [...state.zones, zone] })),
+  addZone: (zone) => set((state) => ({ zones: [...state.zones, normalizeZone(zone)] })),
   updateZone: (zone) =>
-    set((state) => ({ zones: state.zones.map((z) => (z.id === zone.id ? zone : z)) })),
+    set((state) => ({ zones: state.zones.map((z) => (z.id === zone.id ? normalizeZone(zone) : z)) })),
   removeZone: (id) =>
     set((state) => ({
       zones: state.zones.filter((z) => z.id !== id),
