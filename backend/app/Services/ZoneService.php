@@ -140,7 +140,7 @@ class ZoneService
         return $zone->fresh();
     }
 
-    public function transitionStatus(Zone $zone, User $actor, string $requestedStatus, ?string $note = null): Zone
+    public function transitionStatus(Zone $zone, User $actor, string $requestedStatus, ?string $note = null, ?int $completionPct = null, ?string $notes = null, ?string $deadline = null): Zone
     {
         $currentStatus = (string) $zone->status;
         $requestedStatus = (string) $requestedStatus;
@@ -160,6 +160,15 @@ class ZoneService
             $payload['completion_pct'] = 0;
         } elseif ($requestedStatus === 'completed') {
             $payload['completion_pct'] = 100;
+        } elseif ($completionPct !== null) {
+            $payload['completion_pct'] = $completionPct;
+        }
+
+        if ($notes !== null) {
+            $payload['notes'] = $notes;
+        }
+        if ($deadline !== null) {
+            $payload['deadline'] = $deadline;
         }
 
         $zone = $this->zoneRepository->update($zone, $payload);

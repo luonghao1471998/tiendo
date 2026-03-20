@@ -138,10 +138,11 @@ class LayerController extends Controller
 
     /**
      * GET /api/v1/layers/{layer}/tiles/{z}/{x}/{y}
+     * Public route — no Sanctum auth required so <img> tags can load tiles directly.
      */
     public function tile(Request $request, Layer $layer, int $z, int $x, int $y): BinaryFileResponse|JsonResponse
     {
-        $this->authorize('view', $layer);
+        // No auth check — tiles are public once layer is ready
 
         if ($layer->tile_path === null || $layer->status !== 'ready') {
             return response()->json([

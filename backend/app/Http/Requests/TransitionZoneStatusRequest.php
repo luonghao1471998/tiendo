@@ -21,6 +21,9 @@ class TransitionZoneStatusRequest extends FormRequest
         return [
             'status' => ['required', 'string', 'in:not_started,in_progress,completed,delayed,paused'],
             'note' => ['nullable', 'string'],
+            'completion_pct' => ['nullable', 'integer', 'between:0,100'],
+            'notes' => ['nullable', 'string'],
+            'deadline' => ['nullable', 'date'],
         ];
     }
 }

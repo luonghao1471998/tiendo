@@ -30,6 +30,10 @@ Route::prefix('v1')->group(function (): void {
     Route::post('/auth/login', [AuthController::class, 'login']);
     Route::get('/health', [HealthController::class, 'show']);
 
+    // Public endpoints — no auth needed (served directly by <img> tags)
+    Route::get('/layers/{layer}/tiles/{z}/{x}/{y}', [LayerController::class, 'tile']);
+    Route::get('/comments/{id}/images/{filename}', [ZoneCommentController::class, 'image']);
+
     // Share link public endpoint — không cần auth
     Route::get('/share/{token}', [ShareLinkController::class, 'resolve']);
 
@@ -74,7 +78,6 @@ Route::prefix('v1')->group(function (): void {
         Route::get('/layers/{layer}/sync', [LayerController::class, 'sync']);
         Route::post('/layers/{layer}/retry', [LayerController::class, 'retry']);
         Route::delete('/layers/{layer}', [LayerController::class, 'destroy']);
-        Route::get('/layers/{layer}/tiles/{z}/{x}/{y}', [LayerController::class, 'tile']);
 
         Route::get('/layers/{layerId}/zones', [ZoneController::class, 'index']);
         Route::post('/layers/{layerId}/zones', [ZoneController::class, 'store']);
@@ -91,7 +94,6 @@ Route::prefix('v1')->group(function (): void {
         Route::get('/zones/{zoneId}/comments', [ZoneCommentController::class, 'index']);
         Route::post('/zones/{zoneId}/comments', [ZoneCommentController::class, 'store']);
         Route::delete('/comments/{id}', [ZoneCommentController::class, 'destroy']);
-        Route::get('/comments/{id}/images/{filename}', [ZoneCommentController::class, 'image']);
 
         Route::get('/layers/{id}/history', [ActivityLogController::class, 'layerHistory']);
         Route::get('/zones/{id}/history', [ActivityLogController::class, 'zoneHistory']);

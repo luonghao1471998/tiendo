@@ -88,7 +88,10 @@ class ZoneController extends Controller
             $zone,
             $user,
             (string) $request->validated('status'),
-            $request->validated('note')
+            $request->validated('note'),
+            $request->validated('completion_pct') !== null ? (int) $request->validated('completion_pct') : null,
+            $request->validated('notes'),
+            $request->validated('deadline'),
         );
 
         return response()->json([

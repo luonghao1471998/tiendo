@@ -71,7 +71,6 @@ class ZoneCommentController extends Controller
     public function image(Request $request, int $id, string $filename): BinaryFileResponse|JsonResponse
     {
         $comment = $this->commentService->getCommentOrFail($id);
-        $this->authorize('viewImage', $comment);
 
         $allowedPath = 'comments/'.$comment->id.'/'.basename($filename);
         if (! in_array($allowedPath, (array) ($comment->images ?? []), true)) {
