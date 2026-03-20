@@ -4,31 +4,22 @@ import { Navigate, useNavigate } from 'react-router-dom'
 
 import useAuthStore from '@/stores/authStore'
 
-function parseApiError(error: unknown): string {
-  if (
-    typeof error === 'object' &&
-    error !== null &&
-    'response' in error &&
-    typeof (error as { response?: unknown }).response === 'object' &&
-    (error as { response?: { data?: unknown } }).response?.data &&
-    typeof (error as { response?: { data?: { error?: { message?: unknown } } } }).response?.data ===
-      'object'
-  ) {
-    const apiMessage = (error as { response?: { data?: { error?: { message?: unknown } } } }).response
-      ?.data?.error?.message
-    if (typeof apiMessage === 'string' && apiMessage.length > 0) {
-      return apiMessage
-    }
+function parseLoginError(error: unknown): string {
+  if (typeof error === 'object' && error !== null && 'response' in error) {
+    const resp = (error as { response?: { data?: { error?: { message?: unknown; details?: unknown } } } }).response
+    const msg = resp?.data?.error?.message
+    if (typeof msg === 'string' && msg) return msg
   }
-  return 'Đăng nhập thất bại. Vui lòng thử lại.'
+  return 'Đăng nhập thất bại. Vui lòng kiểm tra email và mật khẩu.'
 }
 
 export default function Login() {
   const navigate = useNavigate()
-  const { login, token, loading } = useAuthStore()
+  const { login, token } = useAuthStore()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
 
   if (token) {
     return <Navigate to="/projects" replace />
@@ -37,11 +28,14 @@ export default function Login() {
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setError(null)
+    setLoading(true)
     try {
       await login(email.trim(), password)
       navigate('/projects', { replace: true })
     } catch (err) {
-      setError(parseApiError(err))
+      setError(parseLoginError(err))
+    } finally {
+      setLoading(false)
     }
   }
 

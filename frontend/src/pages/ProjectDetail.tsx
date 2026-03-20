@@ -6,6 +6,7 @@ import {
 } from 'lucide-react'
 
 import client from '@/api/client'
+import { parseApiError } from '@/lib/parseApiError'
 import useAuthStore from '@/stores/authStore'
 import useCanvasStore from '@/stores/canvasStore'
 
@@ -83,15 +84,6 @@ const LAYER_TYPE_LABELS: Record<string, string> = {
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-
-function parseApiError(error: unknown, fallback: string): string {
-  if (typeof error === 'object' && error !== null && 'response' in error) {
-    const msg = (error as { response?: { data?: { error?: { message?: unknown } } } }).response
-      ?.data?.error?.message
-    if (typeof msg === 'string' && msg) return msg
-  }
-  return fallback
-}
 
 function resolveProjectRole(
   user: {
@@ -214,7 +206,8 @@ function CreateMasterLayerForm({
         <input
           type="number"
           className="rounded-md border bg-background px-3 py-2 text-sm"
-          placeholder="Thứ tự (0, 1, 2...)"
+          placeholder="Thứ tự hiển thị (0=đầu tiên)"
+          title="Thứ tự hiển thị trong danh sách. 0 = hiển thị đầu tiên, 1 = thứ hai, ..."
           value={sortOrder}
           onChange={(e) => setSortOrder(Number(e.target.value))}
         />
@@ -812,9 +805,9 @@ function ExcelImportModal({
     try {
       const fd = new FormData()
       fd.append('file', file)
-      const resp = (await client.post(`/layers/${layerId}/import`, fd, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      })) as { data: ApiResponse<ExcelImportResult> }
+      const resp = (await client.post(`/layers/${layerId}/import`, fd)) as {
+        data: ApiResponse<ExcelImportResult>
+      }
       setImportJob(resp.data.data)
       setStage('preview')
     } catch (e) {
@@ -995,11 +988,11 @@ function ExcelImportModal({
                   </div>
                 ) : null}
               </div>
-              {applyResult.errors.length > 0 ? (
+              {(applyResult.errors ?? []).length > 0 ? (
                 <div className="rounded-lg border bg-red-50 p-3 text-left text-xs text-red-700">
                   <p className="font-medium mb-1">Lỗi chi tiết:</p>
                   <ul className="space-y-0.5">
-                    {applyResult.errors.map((e, i) => <li key={i}>• {e}</li>)}
+                    {(applyResult.errors ?? []).map((e, i) => <li key={i}>• {e}</li>)}
                   </ul>
                 </div>
               ) : null}
@@ -1544,9 +1537,9 @@ export default function ProjectDetail() {
   const createLayer = async (mlId: number, formData: FormData) => {
     setLayerActionLoading(true)
     try {
-      const resp = (await client.post(`/master-layers/${mlId}/layers`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      })) as { data: ApiResponse<LayerItem> }
+      const resp = (await client.post(`/master-layers/${mlId}/layers`, formData)) as {
+        data: ApiResponse<LayerItem>
+      }
       setLayers((prev) => [...prev, resp.data.data])
     } finally {
       setLayerActionLoading(false)

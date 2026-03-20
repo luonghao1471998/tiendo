@@ -46,20 +46,18 @@ const useAuthStore = create<AuthState & AuthActions>((set, get) => ({
   loading: false,
 
   async login(email, password) {
-    set({ loading: true })
-    try {
-      const resp = (await client.post('/auth/login', { email, password })) as {
-        data: ApiResponse<{ token: string; expires_at: string; user: AuthUser }>
-      }
-
-      const token = resp.data.data.token
-      const user = resp.data.data.user
-      setAuthToken(token)
-      set({ token, user })
-      await get().me()
-    } finally {
-      set({ loading: false })
+    // Do NOT set global loading here — that would unmount the Login page
+    // and cause setError() in the catch to be called on an unmounted component.
+    // Login.tsx uses its own local loading state instead.
+    const resp = (await client.post('/auth/login', { email, password })) as {
+      data: ApiResponse<{ token: string; expires_at: string; user: AuthUser }>
     }
+
+    const token = resp.data.data.token
+    const user = resp.data.data.user
+    setAuthToken(token)
+    set({ token, user })
+    await get().me()
   },
 
   async logout() {

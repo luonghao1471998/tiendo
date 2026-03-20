@@ -7,6 +7,7 @@ import CanvasWrapper from '@/components/canvas/CanvasWrapper'
 import TileLayer from '@/components/canvas/TileLayer'
 import ZoomControls from '@/components/canvas/ZoomControls'
 import { ZONE_STATUS, ZONE_STATUS_COLOR, MARK_STATUS_COLOR } from '@/lib/constants'
+import { parseApiError } from '@/lib/parseApiError'
 import type { Zone, Mark, Geometry } from '@/stores/canvasStore'
 import useCanvasStore from '@/stores/canvasStore'
 import useAuthStore from '@/stores/authStore'
@@ -26,14 +27,6 @@ type ApiResponse<T> = { success: boolean; data: T }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
-function parseApiError(err: unknown, fallback: string): string {
-  if (typeof err === 'object' && err !== null && 'response' in err) {
-    const msg = (err as { response?: { data?: { error?: { message?: unknown } } } }).response
-      ?.data?.error?.message
-    if (typeof msg === 'string' && msg) return msg
-  }
-  return fallback
-}
 
 const STATUS_LABELS: Record<string, string> = {
   not_started: 'Chưa bắt đầu',
@@ -99,6 +92,7 @@ function StatusPopup({
   const [status, setStatus] = useState(zone.status)
   const [pct, setPct] = useState(zone.completion_pct)
   const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const allowed = FIELD_TEAM_TRANSITIONS[zone.status] ?? []
@@ -112,13 +106,16 @@ function StatusPopup({
         await client.patch(`/zones/${zone.id}/status`, { status })
       }
       // Update completion_pct via PUT /zones/{id}
-      const resp = (await client.patch(`/zones/${zone.id}`, {
+      const resp = (await client.put(`/zones/${zone.id}`, {
+        name: zone.name,
         completion_pct: pct,
       })) as { data: ApiResponse<Zone> }
       const updated = resp.data.data
       updateZone(updated)
       onSaved(updated)
-      onClose()
+      setSaved(true)
+      // Show "Đã lưu" briefly, then close
+      setTimeout(() => { onClose() }, 1200)
     } catch (err) {
       setError(parseApiError(err, 'Lưu thất bại.'))
     } finally {
@@ -203,14 +200,15 @@ function StatusPopup({
         </div>
 
         {error ? <p className="text-xs text-red-600">{error}</p> : null}
+        {saved ? <p className="text-xs text-emerald-600 font-medium">✓ Đã lưu thành công!</p> : null}
 
         <button
           type="button"
           onClick={() => void save()}
-          disabled={saving}
+          disabled={saving || saved}
           className="w-full rounded-lg bg-primary py-2 text-sm font-medium text-primary-foreground disabled:opacity-60"
         >
-          {saving ? 'Đang lưu...' : 'Lưu tiến độ'}
+          {saving ? 'Đang lưu...' : saved ? 'Đã lưu ✓' : 'Lưu tiến độ'}
         </button>
       </div>
     </div>
@@ -620,11 +618,17 @@ export default function CanvasProgress() {
     return () => clearInterval(id)
   }, [layerIdNum, lastSyncAt, syncSince])
 
+  // Convert frontend [x,y][] tuples → API {type, points: [{x,y}]} format
+  const toApiGeometry = (geometry: Geometry) => ({
+    type: 'polygon',
+    points: (geometry.points ?? []).map(([x, y]) => ({ x, y })),
+  })
+
   // Submit newly drawn mark to API
   const handleMarkDrawn = async (zoneId: number, geometry: Geometry) => {
     try {
       const resp = (await client.post(`/zones/${zoneId}/marks`, {
-        geometry_pct: geometry,
+        geometry_pct: toApiGeometry(geometry),
         status: markStatusDraw,
       })) as { data: ApiResponse<Mark> }
       addMark(resp.data.data)

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Link, useParams } from 'react-router-dom'
-import { ChevronLeft } from 'lucide-react'
+import { CheckCircle2, ChevronLeft } from 'lucide-react'
 
 import client from '@/api/client'
 import CanvasToolbar from '@/components/canvas/CanvasToolbar'
@@ -10,6 +11,7 @@ import PolygonLayer from '@/components/canvas/PolygonLayer'
 import TileLayer from '@/components/canvas/TileLayer'
 import ZoomControls from '@/components/canvas/ZoomControls'
 import { ZONE_STATUS, ZONE_STATUS_COLOR } from '@/lib/constants'
+import { parseApiError } from '@/lib/parseApiError'
 import type { Zone, Geometry } from '@/stores/canvasStore'
 import useCanvasStore from '@/stores/canvasStore'
 import useAuthStore from '@/stores/authStore'
@@ -27,15 +29,6 @@ type LayerInfo = {
 type ApiResponse<T> = { success: boolean; data: T }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-
-function parseApiError(err: unknown, fallback: string): string {
-  if (typeof err === 'object' && err !== null && 'response' in err) {
-    const msg = (err as { response?: { data?: { error?: { message?: unknown } } } }).response
-      ?.data?.error?.message
-    if (typeof msg === 'string' && msg) return msg
-  }
-  return fallback
-}
 
 const STATUS_LABELS: Record<string, string> = {
   not_started: 'Chưa bắt đầu',
@@ -79,20 +72,40 @@ function ZoneCreateModal({
     }
   }
 
+  const fieldCls =
+    'w-full rounded-lg border border-[#E2E8F0] bg-white px-3 py-2 text-sm text-[#0F172A] placeholder:text-[#94A3B8] shadow-sm transition focus:border-[#FF7F29] focus:outline-none focus:ring-2 focus:ring-[#FF7F29]/25'
+
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4">
-      <div className="w-full max-w-md rounded-xl border bg-card shadow-2xl">
-        <div className="border-b px-5 py-4">
-          <h2 className="font-semibold">Thông tin khu vực mới</h2>
+    <div
+      className="fixed inset-0 z-[9999] flex items-center justify-center bg-[#0F172A]/55 p-4 backdrop-blur-sm"
+      role="presentation"
+      onClick={onCancel}
+    >
+      <div
+        className="w-full max-w-md overflow-hidden rounded-2xl border border-[#E2E8F0] bg-white shadow-[0_25px_50px_-12px_rgba(15,23,42,0.35)]"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="zone-create-modal-title"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="border-b border-[#E2E8F0] bg-[#F8FAFC] px-6 py-4">
+          <div className="border-l-4 border-[#FF7F29] pl-3">
+            <h2 id="zone-create-modal-title" className="text-lg font-semibold text-[#0F172A]">
+              Thông tin khu vực mới
+            </h2>
+            <p className="mt-0.5 text-xs text-[#64748B]">
+              Nhập tên khu vực và thông tin bổ sung (nếu có).
+            </p>
+          </div>
         </div>
-        <div className="space-y-3 p-5">
+        <div className="space-y-3 p-6">
           <div>
-            <label className="mb-1 block text-xs font-medium">
+            <label className="mb-1 block text-xs font-medium text-[#0F172A]">
               Tên khu vực <span className="text-red-500">*</span>
             </label>
             <input
               autoFocus
-              className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+              className={fieldCls}
               placeholder="VD: Phòng 101A"
               value={name}
               onChange={(e) => setName(e.target.value)}
@@ -100,48 +113,50 @@ function ZoneCreateModal({
             />
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium">Người phụ trách</label>
+            <label className="mb-1 block text-xs font-medium text-[#0F172A]">Người phụ trách</label>
             <input
-              className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+              className={fieldCls}
               placeholder="Tên đội/người (tuỳ chọn)"
               value={assignee}
               onChange={(e) => setAssignee(e.target.value)}
             />
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium">Deadline</label>
+            <label className="mb-1 block text-xs font-medium text-[#0F172A]">Deadline</label>
             <input
               type="date"
-              className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+              className={fieldCls}
               value={deadline}
               onChange={(e) => setDeadline(e.target.value)}
             />
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium">Công việc</label>
+            <label className="mb-1 block text-xs font-medium text-[#0F172A]">Công việc</label>
             <input
-              className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+              className={fieldCls}
               placeholder="Mô tả công việc (tuỳ chọn)"
               value={tasks}
               onChange={(e) => setTasks(e.target.value)}
             />
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium">Ghi chú</label>
+            <label className="mb-1 block text-xs font-medium text-[#0F172A]">Ghi chú</label>
             <textarea
-              className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+              className={`${fieldCls} resize-y`}
               rows={2}
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
             />
           </div>
-          {err ? <p className="text-xs text-red-600">{err}</p> : null}
+          {err ? (
+            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{err}</div>
+          ) : null}
         </div>
-        <div className="flex justify-end gap-2 border-t px-5 py-4">
+        <div className="flex justify-end gap-2 border-t border-[#E2E8F0] bg-[#F8FAFC] px-6 py-4">
           <button
             type="button"
             onClick={onCancel}
-            className="rounded-md border px-4 py-2 text-sm"
+            className="rounded-xl border border-[#E2E8F0] bg-white px-4 py-2 text-sm font-medium text-[#0F172A] transition hover:bg-[#F8FAFC]"
           >
             Hủy
           </button>
@@ -149,7 +164,7 @@ function ZoneCreateModal({
             type="button"
             onClick={() => void submit()}
             disabled={loading}
-            className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground disabled:opacity-60"
+            className="rounded-xl bg-[#FF7F29] px-5 py-2 text-sm font-semibold text-white transition hover:bg-[#E5691D] disabled:opacity-60"
           >
             {loading ? 'Đang lưu...' : 'Tạo khu vực'}
           </button>
@@ -186,6 +201,14 @@ type HistoryEntry = {
 // ─── CommentsTab ─────────────────────────────────────────────────────────────
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024 // 10 MB per file
+const MAX_IMAGES_PER_COMMENT = 5
+
+/** Backend lưu path dạng `comments/{id}/uuid.png`; route GET chỉ nhận basename (xem ZoneCommentController::image). */
+function commentImageBasename(storedPath: string): string {
+  const s = String(storedPath).trim().replace(/\\/g, '/')
+  const parts = s.split('/').filter(Boolean)
+  return parts[parts.length - 1] ?? s
+}
 
 function CommentsTab({ zone, isPM }: { zone: Zone; isPM: boolean }) {
   const { user } = useAuthStore()
@@ -208,7 +231,10 @@ function CommentsTab({ zone, isPM }: { zone: Zone; isPM: boolean }) {
 
   const submit = async () => {
     if (!text.trim() && files.length === 0) return
-    if (files.length > 5) { setErr('Tối đa 5 ảnh.'); return }
+    if (files.length > MAX_IMAGES_PER_COMMENT) {
+      setErr(`Tối đa ${MAX_IMAGES_PER_COMMENT} ảnh mỗi bình luận.`)
+      return
+    }
     const oversized = files.find((f) => f.size > MAX_IMAGE_BYTES)
     if (oversized) { setErr(`"${oversized.name}" vượt quá 10 MB.`); return }
     setPosting(true); setErr(null)
@@ -216,9 +242,8 @@ function CommentsTab({ zone, isPM }: { zone: Zone; isPM: boolean }) {
       const fd = new FormData()
       if (text.trim()) fd.append('content', text.trim())
       files.forEach((f) => fd.append('images[]', f))
-      const resp = (await client.post(`/zones/${zone.id}/comments`, fd, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      })) as { data: ApiResponse<Comment> }
+      // KHÔNG set Content-Type thủ công — thiếu boundary khiến Laravel không nhận file → chỉ lưu text / Validation failed
+      const resp = (await client.post(`/zones/${zone.id}/comments`, fd)) as { data: ApiResponse<Comment> }
       setComments((prev) => [...prev, resp.data.data])
       setText('')
       setFiles([])
@@ -261,15 +286,19 @@ function CommentsTab({ zone, isPM }: { zone: Zone; isPM: boolean }) {
               {c.content ? <p className="mb-1 text-xs">{c.content}</p> : null}
               {c.images.length > 0 ? (
                 <div className="flex flex-wrap gap-1 mt-1">
-                  {c.images.map((img) => (
-                    <a key={img} href={`${BASE}/comments/${c.id}/images/${img}`} target="_blank" rel="noreferrer">
-                      <img
-                        src={`${BASE}/comments/${c.id}/images/${img}`}
-                        alt={img}
-                        className="h-12 w-12 rounded object-cover border"
-                      />
-                    </a>
-                  ))}
+                  {c.images.map((img) => {
+                    const basename = commentImageBasename(img)
+                    const imgUrl = `${BASE}/comments/${c.id}/images/${encodeURIComponent(basename)}`
+                    return (
+                      <a key={`${c.id}-${img}`} href={imgUrl} target="_blank" rel="noreferrer">
+                        <img
+                          src={imgUrl}
+                          alt={basename}
+                          className="h-12 w-12 rounded object-cover border"
+                        />
+                      </a>
+                    )
+                  })}
                 </div>
               ) : null}
               {(user?.id === c.user_id || isPM) ? (
@@ -298,7 +327,7 @@ function CommentsTab({ zone, isPM }: { zone: Zone; isPM: boolean }) {
         />
         <div className="flex items-center gap-2">
           <label className="cursor-pointer rounded-md border px-2 py-1 text-xs text-muted-foreground hover:bg-muted">
-            📎 Ảnh ({files.length}/5)
+            📎 Ảnh ({files.length}/{MAX_IMAGES_PER_COMMENT})
             <input
               ref={fileRef}
               type="file"
@@ -306,18 +335,33 @@ function CommentsTab({ zone, isPM }: { zone: Zone; isPM: boolean }) {
               accept="image/*"
               className="hidden"
               onChange={(e) => {
-                const picked = Array.from(e.target.files ?? []).slice(0, 5)
-                const oversized = picked.find((f) => f.size > MAX_IMAGE_BYTES)
-                if (oversized) { setErr(`"${oversized.name}" vượt quá 10 MB.`); return }
+                const all = Array.from(e.target.files ?? [])
+                if (all.length > MAX_IMAGES_PER_COMMENT) {
+                  setErr(`Tối đa ${MAX_IMAGES_PER_COMMENT} ảnh mỗi bình luận.`)
+                  e.target.value = ''
+                  setFiles([])
+                  return
+                }
+                const oversized = all.find((f) => f.size > MAX_IMAGE_BYTES)
+                if (oversized) {
+                  setErr(`"${oversized.name}" vượt quá 10 MB.`)
+                  e.target.value = ''
+                  setFiles([])
+                  return
+                }
                 setErr(null)
-                setFiles(picked)
+                setFiles(all)
               }}
             />
           </label>
           <button
             type="button"
             onClick={() => void submit()}
-            disabled={posting || (!text.trim() && files.length === 0)}
+            disabled={
+              posting ||
+              (!text.trim() && files.length === 0) ||
+              files.length > MAX_IMAGES_PER_COMMENT
+            }
             className="ml-auto rounded-md bg-primary px-3 py-1 text-xs text-primary-foreground disabled:opacity-60"
           >
             {posting ? 'Đang gửi...' : 'Gửi'}
@@ -435,7 +479,19 @@ function HistoryTab({ zone, isPM, layerId }: { zone: Zone; isPM: boolean; layerI
 
 type PanelTab = 'detail' | 'comments' | 'history'
 
-function ZoneDetailPanel({ zone, layerId, onClose }: { zone: Zone; layerId: number; onClose: () => void }) {
+type Member = { user: { id: number; name: string; email: string }; role: string }
+
+function ZoneDetailPanel({
+  zone,
+  layerId,
+  projectId,
+  onClose,
+}: {
+  zone: Zone
+  layerId: number
+  projectId: number
+  onClose: () => void
+}) {
   const { user } = useAuthStore()
   const { updateZone, removeZone } = useCanvasStore()
   const [tab, setTab] = useState<PanelTab>('detail')
@@ -445,7 +501,30 @@ function ZoneDetailPanel({ zone, layerId, onClose }: { zone: Zone; layerId: numb
   const [pct, setPct] = useState(zone.completion_pct)
   const [notes, setNotes] = useState(zone.notes ?? '')
   const [deadline, setDeadline] = useState(zone.deadline ?? '')
+  const [assignedUserId, setAssignedUserId] = useState<number | null>(zone.assigned_user_id ?? null)
   const [err, setErr] = useState<string | null>(null)
+  /** Success toast — portal to document.body so luôn nổi trên canvas/sidebar */
+  const [saveToastVisible, setSaveToastVisible] = useState(false)
+  const saveToastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [members, setMembers] = useState<Member[]>([])
+
+  const MIN_SAVE_INDICATOR_MS = 550
+  const SAVE_TOAST_DURATION_MS = 4200
+
+  // Fetch project members for assignee dropdown
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const resp = (await client.get(`/projects/${projectId}/members`)) as {
+          data: ApiResponse<Member[]>
+        }
+        setMembers(resp.data.data ?? [])
+      } catch {
+        // silent — assignee dropdown stays empty
+      }
+    }
+    void load()
+  }, [projectId])
 
   // Reset form when zone changes
   useEffect(() => {
@@ -453,15 +532,33 @@ function ZoneDetailPanel({ zone, layerId, onClose }: { zone: Zone; layerId: numb
     setPct(zone.completion_pct)
     setNotes(zone.notes ?? '')
     setDeadline(zone.deadline ?? '')
+    setAssignedUserId(zone.assigned_user_id ?? null)
     setErr(null)
     setTab('detail')
+    setSaveToastVisible(false)
+    if (saveToastTimeoutRef.current) {
+      clearTimeout(saveToastTimeoutRef.current)
+      saveToastTimeoutRef.current = null
+    }
   }, [zone.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    return () => {
+      if (saveToastTimeoutRef.current) clearTimeout(saveToastTimeoutRef.current)
+    }
+  }, [])
 
   const isPM = user?.role === 'admin' ||
     user?.projects.some((p) => p.role === 'project_manager') === true
 
   const save = async () => {
     setSaving(true); setErr(null)
+    if (saveToastTimeoutRef.current) {
+      clearTimeout(saveToastTimeoutRef.current)
+      saveToastTimeoutRef.current = null
+    }
+    setSaveToastVisible(false)
+    const started = Date.now()
     try {
       let resp: { data: ApiResponse<Zone> }
       if (status !== zone.status) {
@@ -479,9 +576,20 @@ function ZoneDetailPanel({ zone, layerId, onClose }: { zone: Zone; layerId: numb
           completion_pct: pct,
           notes,
           deadline: deadline || null,
+          assigned_user_id: assignedUserId ?? null,
         })) as { data: ApiResponse<Zone> }
       }
       updateZone(resp.data.data)
+      // Giữ "Đang lưu..." tối thiểu MIN_SAVE_INDICATOR_MS để người dùng kịp nhận ra
+      const elapsed = Date.now() - started
+      if (elapsed < MIN_SAVE_INDICATOR_MS) {
+        await new Promise((r) => setTimeout(r, MIN_SAVE_INDICATOR_MS - elapsed))
+      }
+      setSaveToastVisible(true)
+      saveToastTimeoutRef.current = setTimeout(() => {
+        setSaveToastVisible(false)
+        saveToastTimeoutRef.current = null
+      }, SAVE_TOAST_DURATION_MS)
     } catch (e) {
       setErr(parseApiError(e, 'Lưu thất bại.'))
     } finally {
@@ -511,8 +619,31 @@ function ZoneDetailPanel({ zone, layerId, onClose }: { zone: Zone; layerId: numb
 
   const fieldCls = 'w-full rounded-lg border border-[#E2E8F0] bg-white px-2.5 py-1.5 text-sm text-[#0F172A] transition focus:border-[#FF7F29] focus:outline-none focus:ring-2 focus:ring-[#FF7F29]/20'
 
+  const saveToast =
+    saveToastVisible && typeof document !== 'undefined'
+      ? createPortal(
+          <div
+            role="status"
+            aria-live="polite"
+            className="pointer-events-none fixed bottom-8 left-1/2 z-[10050] flex max-w-[min(100vw-2rem,24rem)] -translate-x-1/2"
+          >
+            <div className="pointer-events-auto flex items-start gap-3 rounded-2xl border border-emerald-200 bg-white px-5 py-4 shadow-[0_12px_40px_-8px_rgba(15,23,42,0.28)]">
+              <CheckCircle2 className="mt-0.5 h-6 w-6 shrink-0 text-emerald-600" aria-hidden />
+              <div>
+                <p className="text-sm font-semibold text-[#0F172A]">Đã lưu thành công</p>
+                <p className="mt-0.5 text-xs leading-relaxed text-[#64748B]">
+                  Trạng thái và tiến độ khu vực đã được cập nhật trên bản vẽ.
+                </p>
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )
+      : null
+
   return (
     <div>
+      {saveToast}
       {/* Zone header */}
       <div className="flex items-center gap-2.5 bg-[#F8FAFC] px-3 py-2.5">
         <div className="h-3 w-3 shrink-0 rounded-full" style={{ backgroundColor: color }} />
@@ -562,6 +693,33 @@ function ZoneDetailPanel({ zone, layerId, onClose }: { zone: Zone; layerId: numb
               onChange={(e) => setPct(Number(e.target.value))}
               className="w-full accent-[#FF7F29]" />
           </div>
+
+          {/* Assignee dropdown — chỉ PM/admin mới đổi được */}
+          {isPM ? (
+            <div>
+              <label className="mb-1.5 block text-xs font-medium text-[#64748B]">Giao cho</label>
+              <select
+                className={fieldCls}
+                value={assignedUserId ?? ''}
+                onChange={(e) => setAssignedUserId(e.target.value ? Number(e.target.value) : null)}
+              >
+                <option value="">— Chưa giao —</option>
+                {members.map((m) => (
+                  <option key={m.user.id} value={m.user.id}>
+                    {m.user.name}
+                    {m.role === 'field_team' ? '' : ` (${m.role === 'project_manager' ? 'PM' : m.role})`}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : zone.assigned_user_id != null ? (
+            <div>
+              <p className="mb-0.5 text-xs font-medium text-[#64748B]">Giao cho</p>
+              <p className="text-sm text-[#0F172A]">
+                {members.find((m) => m.user.id === zone.assigned_user_id)?.user.name ?? `#${zone.assigned_user_id}`}
+              </p>
+            </div>
+          ) : null}
 
           <div>
             <label className="mb-1.5 block text-xs font-medium text-[#64748B]">Deadline</label>
@@ -922,7 +1080,7 @@ export default function CanvasEditor() {
 
             {selectedZone ? (
               <div className="border-t border-[#E2E8F0] overflow-y-auto">
-                <ZoneDetailPanel zone={selectedZone} layerId={layerIdNum} onClose={() => selectZone(null)} />
+                <ZoneDetailPanel zone={selectedZone} layerId={layerIdNum} projectId={projectIdNum} onClose={() => selectZone(null)} />
               </div>
             ) : null}
           </aside>

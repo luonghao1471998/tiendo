@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { Building2, FolderOpen, MapPin, Plus, X } from 'lucide-react'
 
 import client from '@/api/client'
+import { parseApiError } from '@/lib/parseApiError'
 import useAuthStore from '@/stores/authStore'
 
 type ProjectItem = {
@@ -41,15 +42,6 @@ function CreateProjectModal({
   const [address, setAddress] = useState('')
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState<string | null>(null)
-
-  const parseApiError = (error: unknown, fallback: string): string => {
-    if (typeof error === 'object' && error !== null && 'response' in error) {
-      const msg = (error as { response?: { data?: { error?: { message?: unknown } } } }).response
-        ?.data?.error?.message
-      if (typeof msg === 'string' && msg) return msg
-    }
-    return fallback
-  }
 
   const submit = async () => {
     if (!name.trim()) { setErr('Tên dự án là bắt buộc.'); return }

@@ -43,7 +43,7 @@ class ZoneCommentController extends Controller
         $comment = $this->commentService->create(
             $zone,
             $user,
-            (string) $request->validated('content'),
+            (string) ($request->validated('content') ?? ''),
             $images
         );
 

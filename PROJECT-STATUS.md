@@ -1,7 +1,7 @@
 # PROJECT-STATUS.md — TienDo
 > File này dùng để upload lên Claude AI Web / Project để AI giữ context xuyên phiên.
 > Cập nhật sau mỗi session. Source of truth: SPEC.md + CLAUDE.md.
-> **Ngày cập nhật:** 2026-03-20
+> **Ngày cập nhật:** 2026-03-21
 
 ---
 
@@ -127,13 +127,13 @@ HEALTH
 
 | Page | Route | Sprint | Trạng thái |
 |---|---|---|---|
-| `Login.tsx` | `/login` | 1 | ✅ Full-screen centered; radial gradient bg; logo icon T + "TienDo" cam; card rounded-2xl; inputs focus ring cam; button rounded-xl |
+| `Login.tsx` | `/login` | 1 | ✅ Full-screen centered; radial gradient bg; logo icon T + "TienDo" cam; card rounded-2xl; inputs focus ring cam; button rounded-xl; local `loading` state (authStore.login không set loading → tránh mất thông báo lỗi sai mật khẩu) |
 | `ProjectList.tsx` | `/` | 1 | ✅ Lucide MapPin/Plus/Building2/FolderOpen; skeleton loading; card rounded-2xl hover border cam; empty state đẹp |
 | `ProjectDetail.tsx` | `/projects/:id` | 1+3 | ✅ Bento grid stats với Lucide icons (Layers/CheckCircle2/HardHat/AlertTriangle/PauseCircle/TrendingUp); project header Building2 + MapPin; ChevronLeft breadcrumb; Tab Mặt bằng + Thành viên + Cài đặt |
 | `AdminUsers.tsx` | `/admin/users` | 1 | ✅ Table + inline edit (GET/PUT /users), admin-only guard |
-| `CanvasEditor.tsx` | `/projects/:id/layers/:id/editor` | 1+2 | ✅ ChevronLeft breadcrumb; sidebar zone items rounded-lg no border-b; count badge rounded-full; filter chips màu status; ZoneDetailPanel inputs focus ring cam; Lưu rounded-xl |
+| `CanvasEditor.tsx` | `/projects/:id/layers/:id/editor` | 1+2 | ✅ ChevronLeft breadcrumb; sidebar zone items rounded-lg; ZoneDetailPanel: dropdown "Giao cho"; CommentsTab: FormData multipart đúng + URL ảnh `commentImageBasename` + encode; ZoneCreateModal overlay brand; lưu zone: toast portal + min delay "Đang lưu..." |
 | `CanvasProgress.tsx` | `/projects/:id/layers/:id/progress` | 1+2 | ✅ Own-zone highlight, StatusPopup, mark draw, MarkPopup — responsive drawer sidebar |
-| `CanvasView.tsx` | `/projects/:id/layers/:id/view` | 1+2 | ✅ Read-only, StatsBar, filter chips, Export Excel |
+| `CanvasView.tsx` | `/projects/:id/layers/:id/view` | 1+2 | ✅ Read-only, StatsBar, filter chips, Export Excel; `onZoneClick` = `useCallback` (tránh mất zone khi mở popup) |
 | `ShareView.tsx` | `/share/:token` | 1 | ✅ Public (no auth), layer selector, canvas read-only |
 | `Notifications.tsx` | `/notifications` | 2 | ✅ BellOff empty state; icon per type (Bell/Clock); unread bg-[#FFF3E8] border cam; "Đọc tất cả" CheckCheck icon |
 
@@ -156,11 +156,21 @@ HEALTH
 
 #### Sprint 2 — Tính năng bổ sung:
 
-- **CommentsTab** (trong ZoneDetailPanel): fetch/add/delete; PM có thể xóa mọi comment; validate max 5 ảnh + 10MB/file; reset list khi đổi zone
+- **CommentsTab** (trong ZoneDetailPanel): fetch/add/delete; PM có thể xóa mọi comment; max 5 ảnh + 10MB/file; **không** set `Content-Type` multipart thủ công (axios tự boundary); URL thumbnail: `commentImageBasename()` + `encodeURIComponent`; reset list khi đổi zone
 - **HistoryTab** (trong ZoneDetailPanel): timeline activity log; Rollback button cho PM/admin (`isPM` prop); sau rollback gọi `fetchZonesAndMarks(layerId)` để refresh canvas; reset list khi đổi zone
 - **ZoneDetailPanel tabbed**: 3 tabs — Chi tiết / Bình luận / Lịch sử; nhận `layerId` prop để pass cho HistoryTab
 - **Notifications page**: bell icon, unread badge polling 60s (`useUnreadCount` hook), mark read/all
 - **AppShell responsive**: hamburger menu mobile, notification badge, `MainNavLink`/`MobileNavLink`
+- **ZoneDetailPanel "Giao cho"**: dropdown `assigned_user_id` → `GET /projects/{id}/members`; PM/admin có thể giao zone cho thành viên; field_team xem read-only; payload `PUT /zones/{id}` có `assigned_user_id`
+
+#### Bug fixes P1 (blocking):
+
+- **B1 `CanvasProgress` 405**: `PATCH /zones/{id}` không tồn tại → đổi sang `PUT /zones/{id}` với body `{ name, completion_pct }` để cập nhật tiến độ mà không đổi status
+- **B2 `CanvasProgress` marks 422**: geometry_pct gửi `[x,y][]` tuple → backend expect `{x,y}[]` → thêm `toApiGeometry()` helper, dùng trước khi POST `/zones/{id}/marks`
+- **B3 `ShareView` flatMap crash**: `master_layers` / `ml.layers` có thể undefined từ API → thêm `?? []` guard ở 2 chỗ. Bonus: fix tile URL `0_x_y.jpg` → `0/x/y`
+- **B4 `ExcelImportModal` length crash**: `applyResult.errors` từ API có thể `null` → `(applyResult.errors ?? []).length` và `.map()`
+- **B5 comment image URL + multipart**: URL sai nhiều segment sau `/images/` → 404; + gửi `Content-Type: multipart/form-data` không boundary → server không nhận file. Fix: `commentImageBasename()` + `encodeURIComponent`; bỏ header Content-Type trên FormData (CommentsTab + Excel import + upload PDF trong ProjectDetail)
+- **B6 backend comment nullable**: `StoreZoneCommentRequest.content` đổi `required` → `nullable` + `withValidator` enforce "must have content OR images"; migration `make_zone_comments_content_nullable` đã chạy
 - **Responsive polish**: tất cả pages dùng Tailwind breakpoints, sidebar = fixed drawer trên mobile/tablet
 
 #### Sprint 3 — Tính năng bổ sung:
@@ -171,6 +181,14 @@ HEALTH
 #### Bug fixes (post-brand):
 
 - **Stats bar "undefined%"**: Backend `ProjectDashboardRepository` trả `progress_pct` / `completed` / `in_progress` / `delayed` / `paused` / `not_started` — frontend type cũ dùng sai tên (`completion_pct`, `done_zones`, `in_progress_zones`...). Fix: cập nhật `ProjectStats` type + render để match đúng field names. Thêm `Math.round()` cho `progress_pct` (float từ DB `AVG()`).
+
+#### Bug fixes / QA (2026-03 — E2E):
+
+- **`parseApiError.ts`**: API Laravel trả `error.code: VALIDATION_ERROR` (không phải `VALIDATION_FAILED`) + `details` — gom message từng field; duplicate project code → hiển thị đúng message từ `details`
+- **`App.tsx`**: route `/share/:token` render ngay, không chặn bởi `authStore.loading` (tab ẩn danh)
+- **`ShareView.tsx`**: cấu trúc `data.layers[]` (không `master_layers`); không gọi endpoint zones/marks riêng; Fabric nền trong suốt + tiles sibling
+- **`ProjectList` CreateProjectModal**: validation message từ API qua `parseApiError`
+- **`ZoneCreateModal`**: overlay + card brand (TEST 5.7)
 
 #### Brand Design — Ánh Dương (#FF7F29):
 
@@ -315,6 +333,7 @@ viewer         → read-only + export
 ### Cấu trúc thư mục:
 ```
 frontend/src/
+├── App.tsx                    ← BrowserRouter + Routes; `/share/:token` render khi `loading` (tránh block ShareView)
 ├── api/
 │   └── client.ts              ← Axios instance + Bearer interceptor + setAuthToken/getAuthToken
 ├── stores/
@@ -323,6 +342,7 @@ frontend/src/
 ├── lib/
 │   ├── geometry.ts            ← toPercent/fromPercent helpers
 │   ├── constants.ts           ← ZONE_STATUS_COLOR, MARK_STATUS_COLOR
+│   ├── parseApiError.ts       ← VALIDATION_ERROR + details; INVALID_STATE_TRANSITION → tiếng Việt
 │   └── utils.ts               ← cn()
 ├── pages/
 │   ├── Login.tsx
@@ -352,15 +372,22 @@ frontend/src/
 - **Layer polling**: `processingLayerIdsRef` (useRef Set) để `setInterval` không cần `layers` trong deps
 - **publicClient**: Separate Axios instance KHÔNG có auth interceptor — dùng trong `ShareView.tsx`
 - **Tile URL format**: `/api/v1/layers/{id}/tiles/0/{x}/{y}` (slash-separated, z=0 fixed, NO `.jpg` extension, public route)
-- **Comment image URL**: `/api/v1/comments/{id}/images/{filename}` (public route — `<img>` tag không cần token)
+- **Comment image URL**: GET `/api/v1/comments/{id}/images/{filename}` (public — `<img>` không cần token); `{filename}` là **basename** (vd. `uuid.png`), không ghép cả path `comments/...`
 - **geometry_pct**: API nhận/trả `{type: 'polygon', points: [{x,y}]}`; frontend dùng `toApiGeometry()` khi gửi, `normalizeGeometry()` khi nhận
+- **Laravel 422 validation**: `bootstrap/app.php` trả `error.code: VALIDATION_ERROR` (không phải `VALIDATION_FAILED`) + `details: { field: ["msg"] }`; `parseApiError()` phải gom tất cả message trong `details` — không chỉ đọc `error.message` ("Validation failed.")
+- **ZoneDetailPanel lưu**: sau API thành công chờ thêm tối thiểu ~550ms rồi mới tắt "Đang lưu..."; toast "Đã lưu thành công" render qua `createPortal(..., document.body)` + `z-[10050]` để luôn nổi trên canvas; `INVALID_STATE_TRANSITION` hiển thị câu tiếng Việt đầy đủ (không hiện token cho end user)
 - **Export Excel**: dùng `client.get(..., { responseType: 'blob' })` + `URL.createObjectURL` — KHÔNG dùng `<a href>` trực tiếp
-- **CommentsTab**: multipart `FormData` cho ảnh upload; PM có quyền xóa; `isPM` prop từ ZoneDetailPanel; reset `comments` khi `zone.id` đổi
+- **CommentsTab**: multipart `FormData` cho ảnh — **không** set `Content-Type: multipart/form-data` thủ công (thiếu boundary → server không nhận file); URL ảnh: basename file + `encodeURIComponent` trong path `/api/v1/comments/{id}/images/{filename}`; PM có quyền xóa; reset `comments` khi `zone.id` đổi
 - **HistoryTab**: `isPM` + `layerId` prop; sau rollback gọi `fetchZonesAndMarks(layerId)`; reset `entries` khi `zone.id` đổi
+- **ZoneDetailPanel "Giao cho"**: nhận `projectId` prop; fetch `GET /projects/{id}/members` khi mount; `assigned_user_id` (number|null) trong PUT payload; PM/admin thấy dropdown chọn; field_team thấy read-only text; reset cùng với form khi `zone.id` đổi
+- **CanvasProgress mark geometry**: `handleMarkDrawn` nhận `Geometry` với `points: [number,number][]` (internal) → phải dùng `toApiGeometry()` convert sang `{x,y}[]` trước khi POST marks (giống CanvasEditor)
+- **Comment content nullable**: DB column `zone_comments.content` đã được `nullable()` qua migration. Backend validate: phải có `content` OR ít nhất 1 `images` file
 - **useUnreadCount hook**: `poll` async function đặt *bên trong* `useEffect` để tránh ESLint `react-hooks/set-state-in-effect`
 - **Responsive drawer**: sidebar = `fixed inset-y-0 right-0 z-20` trên mobile/tablet, `lg:relative lg:w-80` trên desktop
 - **SettingsTab**: `clipboard.writeText()` cho copy share link, `window.location.origin` để build full URL
 - **Primary color**: CSS var `--primary: 24 100% 58%` = `hsl(24, 100%, 58%)` ≈ #FF7F29 Ánh Dương orange; `--primary-foreground: white`
+- **Login + global loading**: `authStore.login()` không set `loading: true` — nếu set, `App.tsx` unmount trang Login trong lúc request → `setError` sau khi fail có thể không hiển thị; Login.tsx dùng local `loading` riêng
+- **`App.tsx`**: `pathname.startsWith('/share/')` → bỏ qua màn hình "Đang khởi tạo phiên làm việc..." để ShareView mount ngay (tab ẩn danh)
 
 ---
 
@@ -406,7 +433,7 @@ Role:     admin
 ```
 
 ### Database:
-- **17/17 migrations** tất cả DONE (bộ `1000xx` cũ đã xóa, giữ `1200xx`)
+- **18/18 migrations** tất cả DONE (bộ `1000xx` cũ đã xóa, giữ `1200xx`; +1 `make_zone_comments_content_nullable`)
 - DB name: `tiendo` (không phải `tiendo_test`)
 - Seeded: 1 admin user (tạo qua `php artisan tinker` trong `start-wsl.sh`)
 
@@ -435,7 +462,10 @@ Role:     admin
 | 2 | Stats bar "undefined%" bug | ✅ Fixed — field name mismatch `progress_pct`/`completed`/... đã khớp |
 | 3 | Brand design Ánh Dương (#FF7F29) | ✅ Done — Inter font, orange primary, header cam, cards, tabs, badges |
 | 4.5 | UI Redesign toàn bộ — Bento Box + Soft UI + Flat Design | ✅ Done — Lucide icons, Login/AppShell/ProjectList/ProjectDetail/CanvasEditor/Toolbar/ZoomControls/Notifications redesigned |
+| 4.6 | ZoneDetailPanel: dropdown "Giao cho" (`assigned_user_id`) | ✅ Done — fetch members, PM dropdown, field_team read-only, PUT payload |
+| 4.7 | Fix 6 P1 bugs (B1–B6) chặn sử dụng | ✅ Done — 405/422 CanvasProgress, ShareView flatMap, ExcelImport null, image URL, comment nullable |
 | 4 | Comments/History/Notifications/AppShell bell | ✅ Done + verified đầy đủ |
+| 4.8 | E2E QA: login error, VALIDATION_ERROR, CanvasView zones, zone toast, ShareView, comments multipart/URL (TEST 7.x) | ✅ Done — xem `SESSION-LOG.md` Sprint Commit History |
 | 5 | Deploy VPS thực tế (cần có server + domain) | ⏳ Chờ server |
 | 6 | Certbot SSL | ⏳ Chờ domain |
 | 7 | Cron setup trên VPS (`* * * * * php artisan schedule:run`) | ⏳ Chờ server |

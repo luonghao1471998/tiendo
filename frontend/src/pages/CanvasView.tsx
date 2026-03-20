@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { fabric } from 'fabric'
 import { Link, useParams } from 'react-router-dom'
 
@@ -282,6 +282,11 @@ export default function CanvasView() {
   const [zonePopup, setZonePopup] = useState<{ zone: Zone; x: number; y: number } | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
+  // Stable reference — prevents ReadOnlyCanvas init effect from re-running on every render
+  const handleZoneClick = useCallback((zone: Zone, x: number, y: number) => {
+    setZonePopup({ zone, x, y })
+  }, [])
+
   const zones = useCanvasStore((s) => s.zones)
   const lastSyncAt = useCanvasStore((s) => s.lastSyncAt)
   const { fetchZonesAndMarks, syncSince, reset } = useCanvasStore()
@@ -394,7 +399,7 @@ export default function CanvasView() {
                 widthPx={widthPx}
                 heightPx={heightPx}
                 filterStatus={filterStatus}
-                onZoneClick={(zone, x, y) => setZonePopup({ zone, x, y })}
+                onZoneClick={handleZoneClick}
               />
             </CanvasWrapper>
           ) : (

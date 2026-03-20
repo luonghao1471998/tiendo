@@ -20,7 +20,10 @@ function App() {
     void initSession()
   }, [initSession])
 
-  if (loading) {
+  // Share routes are public — render immediately without waiting for auth loading
+  const isShareRoute = window.location.pathname.startsWith('/share/')
+
+  if (loading && !isShareRoute) {
     return <div className="p-6 text-sm text-muted-foreground">Đang khởi tạo phiên làm việc...</div>
   }
 
