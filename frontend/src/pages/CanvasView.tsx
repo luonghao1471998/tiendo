@@ -180,6 +180,8 @@ function ReadOnlyCanvas({ widthPx, heightPx, filterStatus, onZoneClick }: ReadOn
     fc.clear()
 
     const visibleZones = filterStatus ? zones.filter((z) => z.status === filterStatus) : zones
+    const visibleZoneIds = new Set(visibleZones.map((z) => z.id))
+    const marksToDraw = filterStatus ? marks.filter((m) => visibleZoneIds.has(m.zone_id)) : marks
 
     for (const zone of visibleZones) {
       const pts = toAbsPoints(zone.geometry_pct, widthPx, heightPx)
@@ -213,7 +215,7 @@ function ReadOnlyCanvas({ widthPx, heightPx, filterStatus, onZoneClick }: ReadOn
       fc.add(label)
     }
 
-    for (const mark of marks) {
+    for (const mark of marksToDraw) {
       const pts = toAbsPoints(mark.geometry_pct, widthPx, heightPx)
       if (pts.length < 2) continue
       const color = MARK_STATUS_COLOR[mark.status] ?? '#F59E0B'

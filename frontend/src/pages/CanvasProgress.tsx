@@ -45,9 +45,27 @@ const FIELD_TEAM_TRANSITIONS: Record<string, string[]> = {
   completed: [],
 }
 
+function toAbsPoint(p: unknown, w: number, h: number): fabric.Point | null {
+  if (Array.isArray(p) && p.length >= 2) {
+    const px = Number(p[0])
+    const py = Number(p[1])
+    if (!Number.isFinite(px) || !Number.isFinite(py)) return null
+    return new fabric.Point(px * w, py * h)
+  }
+  if (p && typeof p === 'object' && 'x' in p && 'y' in p) {
+    const px = Number((p as { x: unknown }).x)
+    const py = Number((p as { y: unknown }).y)
+    if (!Number.isFinite(px) || !Number.isFinite(py)) return null
+    return new fabric.Point(px * w, py * h)
+  }
+  return null
+}
+
 function toAbsPoints(geometry: Geometry, w: number, h: number): fabric.Point[] {
   if (geometry.type === 'polygon' && geometry.points) {
-    return geometry.points.map(([px, py]) => new fabric.Point(px * w, py * h))
+    return (geometry.points as unknown[])
+      .map((p) => toAbsPoint(p, w, h))
+      .filter((pt): pt is fabric.Point => pt !== null)
   }
   if (geometry.type === 'rect') {
     const { x = 0, y = 0, width = 0, height = 0 } = geometry
@@ -101,13 +119,10 @@ function StatusPopup({
     setSaving(true)
     setError(null)
     try {
-      // Update status via PATCH /zones/{id}/status if changed
-      if (status !== zone.status) {
-        await client.patch(`/zones/${zone.id}/status`, { status })
-      }
-      // Update completion_pct via PUT /zones/{id}
-      const resp = (await client.put(`/zones/${zone.id}`, {
-        name: zone.name,
+      // Một lần PATCH: đội hiện trường không được PUT /zones (chỉ PM/admin).
+      // Backend chấp nhận status = trạng thái hiện tại để chỉ cập nhật %.
+      const resp = (await client.patch(`/zones/${zone.id}/status`, {
+        status,
         completion_pct: pct,
       })) as { data: ApiResponse<Zone> }
       const updated = resp.data.data
@@ -491,7 +506,15 @@ function MarkDrawCanvas({
     }
 
     const onDblClick = async (e: fabric.IEvent<Event>) => {
-      if (!isDrawingMark || drawPoints.current.length < 3) return
+      if (!isDrawingMark) return
+      if (drawPoints.current.length < 3) {
+        if (drawPoints.current.length > 0) {
+          alert(
+            'Vùng tô cần ít nhất 3 điểm. Hãy nhấp thêm điểm trên bản vẽ, sau đó double-click để kết thúc.',
+          )
+        }
+        return
+      }
 
       // Finish polygon → find zone at centroid
       const pts = [...drawPoints.current]
@@ -558,7 +581,9 @@ function pointInPolygon(x: number, y: number, polygon: fabric.Point[]): boolean 
   for (let i = 0, j = n - 1; i < n; j = i++) {
     const xi = polygon[i].x, yi = polygon[i].y
     const xj = polygon[j].x, yj = polygon[j].y
-    if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) {
+    const denom = yj - yi
+    if (denom === 0) continue
+    if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / denom + xi) {
       inside = !inside
     }
   }
@@ -720,7 +745,11 @@ export default function CanvasProgress() {
               <StatusPopup
                 zone={zonePopup.zone}
                 onClose={() => setZonePopup(null)}
-                onSaved={() => setZonePopup(null)}
+                onSaved={(updated) => {
+                  setZonePopup((prev) =>
+                    prev && prev.zone.id === updated.id ? { ...prev, zone: updated } : prev,
+                  )
+                }}
               />
             </div>
           ) : null}

@@ -14,11 +14,17 @@ class ShareLinkResource extends JsonResource
      */
     public function toArray(Request $request): array
     {
+        $base = rtrim((string) config('app.frontend_url'), '/');
+        if ($base === '') {
+            $base = rtrim((string) config('app.url'), '/');
+        }
+        $sharePath = '/share/'.$this->token;
+
         return [
             'id' => $this->id,
             'project_id' => $this->project_id,
             'token' => $this->token,
-            'url' => url('/share/'.$this->token),
+            'url' => $base.$sharePath,
             'is_active' => $this->is_active,
             'expires_at' => $this->expires_at?->toISOString(),
             'created_at' => $this->created_at?->toISOString(),

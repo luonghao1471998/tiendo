@@ -144,6 +144,11 @@ class ZoneService
     {
         $currentStatus = (string) $zone->status;
         $requestedStatus = (string) $requestedStatus;
+
+        if ($requestedStatus === $currentStatus) {
+            return $this->transitionInPlace($zone, $actor, $completionPct, $notes, $deadline, $note);
+        }
+
         $role = $this->resolveProjectRole($actor, $zone);
 
         $allowed = $this->allowedTransitions($currentStatus, $role);
@@ -188,6 +193,59 @@ class ZoneService
         }
 
         $this->logActivity('zone', $zone->id, 'status_changed', $snapshotBefore, $changes, $actor);
+
+        return $zone->fresh();
+    }
+
+    /**
+     * Cập nhật tiến độ / ghi chú / deadline khi không đổi trạng thái (PATCH status = hiện tại).
+     * Cho phép đội hiện trường dùng PATCH /zones/{id}/status thay vì PUT /zones/{id} (PUT chỉ PM/admin).
+     */
+    private function transitionInPlace(
+        Zone $zone,
+        User $actor,
+        ?int $completionPct,
+        ?string $notes,
+        ?string $deadline,
+        ?string $note
+    ): Zone {
+        // 100% khi đang thi công → hoàn thành zone (đội hiện trường chỉ PATCH /status, không PUT).
+        if ($zone->status === 'in_progress' && $completionPct === 100) {
+            return $this->transitionStatus($zone, $actor, 'completed', $note, null, $notes, $deadline);
+        }
+
+        $snapshotBefore = $zone->toArray();
+        $payload = [];
+
+        if ($completionPct !== null) {
+            $payload['completion_pct'] = $this->resolveCompletionPctForUpdate($zone, $completionPct);
+        }
+        if ($notes !== null) {
+            $payload['notes'] = $notes;
+        }
+        if ($deadline !== null) {
+            $payload['deadline'] = $deadline;
+        }
+
+        $hasNote = $note !== null && $note !== '';
+
+        if ($payload === [] && ! $hasNote) {
+            return $zone->fresh();
+        }
+
+        if ($payload !== []) {
+            $zone = $this->zoneRepository->update($zone, $payload);
+        }
+
+        $after = $zone->fresh()->toArray();
+        $changes = $this->buildChanges($snapshotBefore, $after);
+        if ($hasNote) {
+            $changes['note'] = $note;
+        }
+
+        if ($changes !== []) {
+            $this->logActivity('zone', $zone->id, 'updated', $snapshotBefore, $changes, $actor);
+        }
 
         return $zone->fresh();
     }
@@ -268,7 +326,8 @@ class ZoneService
         if ($role === 'field_team') {
             $fieldMap = [
                 'not_started' => ['in_progress'],
-                'in_progress' => ['paused'],
+                // Cho phép hoàn thành khi tiến độ 100% (PATCH status hiện tại + completion 100 → service chuyển completed).
+                'in_progress' => ['paused', 'completed'],
                 'paused' => ['in_progress'],
                 'delayed' => ['in_progress'],
                 'completed' => [],

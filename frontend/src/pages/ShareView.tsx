@@ -21,13 +21,14 @@ type RawGeometry = {
   x?: number; y?: number; width?: number; height?: number
 }
 
+/** API public share nhúng mark tối giản — có thể thiếu zone_id / geometry_pct */
 type RawMark = {
   id: number
-  zone_id: number
+  zone_id?: number
   status: string
-  geometry_pct: RawGeometry
-  painted_by: number | null
-  updated_at: string | null
+  geometry_pct?: RawGeometry | null
+  painted_by?: number | null
+  updated_at?: string | null
 }
 
 type RawZone = {
@@ -62,11 +63,48 @@ type ShareData = {
   layers: ShareLayer[]
 }
 
-// ─── Geometry normalize: API {x,y}[] → frontend [x,y][] ─────────────────────
+const DEFAULT_LAYER_WIDTH_PX = 2480
+const DEFAULT_LAYER_HEIGHT_PX = 3508
 
-function normalizeGeometry(raw: RawGeometry): Geometry {
-  if (raw.type === 'polygon' && raw.points) {
-    return { type: 'polygon', points: raw.points.map((p) => [p.x, p.y] as [number, number]) }
+/** Cùng quy ước với axios publicClient — tile <img> cần cùng host khi API tách domain */
+const API_BASE = ((import.meta.env.VITE_API_BASE_URL as string | undefined) ?? '/api/v1').replace(/\/$/, '')
+
+function tileUrl(layerId: number, col: number, row: number): string {
+  const path = `/layers/${layerId}/tiles/0/${col}/${row}`
+  if (API_BASE.startsWith('http://') || API_BASE.startsWith('https://')) {
+    return `${API_BASE}${path}`
+  }
+  const prefix = API_BASE.startsWith('/') ? API_BASE : `/${API_BASE}`
+  return `${prefix}${path}`
+}
+
+// ─── Geometry normalize: API {x,y}[] hoặc [x,y][] → frontend [x,y][] ────────
+
+function normalizePoint(p: unknown): [number, number] | null {
+  if (Array.isArray(p) && p.length >= 2) {
+    const x = Number(p[0])
+    const y = Number(p[1])
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null
+    return [x, y]
+  }
+  if (p && typeof p === 'object' && 'x' in p && 'y' in p) {
+    const x = Number((p as RawPoint).x)
+    const y = Number((p as RawPoint).y)
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null
+    return [x, y]
+  }
+  return null
+}
+
+function normalizeGeometry(raw: RawGeometry | null | undefined): Geometry {
+  if (!raw || typeof raw !== 'object') {
+    return { type: 'polygon', points: [] }
+  }
+  if (raw.type === 'polygon' && raw.points && Array.isArray(raw.points)) {
+    const points = raw.points
+      .map((p) => normalizePoint(p))
+      .filter((t): t is [number, number] => t !== null)
+    return { type: 'polygon', points }
   }
   if (raw.type === 'rect') {
     return { type: 'rect', x: raw.x, y: raw.y, width: raw.width, height: raw.height }
@@ -94,18 +132,18 @@ function normalizeZone(raw: RawZone): Zone {
 function normalizeMark(raw: RawMark): Mark {
   return {
     id: raw.id,
-    zone_id: raw.zone_id,
+    zone_id: raw.zone_id ?? 0,
     status: raw.status as Mark['status'],
     geometry_pct: normalizeGeometry(raw.geometry_pct),
-    painted_by: raw.painted_by,
-    updated_at: raw.updated_at,
+    painted_by: raw.painted_by ?? null,
+    updated_at: raw.updated_at ?? null,
   }
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 const publicClient = axios.create({
-  baseURL: (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? '/api/v1',
+  baseURL: API_BASE,
 })
 
 function parseApiError(err: unknown, fallback: string): string {
@@ -127,7 +165,12 @@ const STATUS_LABELS: Record<string, string> = {
 
 function toAbsPoints(geometry: Geometry, w: number, h: number): fabric.Point[] {
   if (geometry.type === 'polygon' && geometry.points) {
-    return geometry.points.map(([px, py]) => new fabric.Point(px * w, py * h))
+    return geometry.points
+      .map(([px, py]) => {
+        if (!Number.isFinite(px) || !Number.isFinite(py)) return null
+        return new fabric.Point(px * w, py * h)
+      })
+      .filter((pt): pt is fabric.Point => pt !== null)
   }
   if (geometry.type === 'rect') {
     const { x = 0, y = 0, width = 0, height = 0 } = geometry
@@ -259,6 +302,9 @@ function ShareCanvas({ layerId, widthPx, heightPx, zones, marks, filterStatus, o
     fc.clear()
 
     const visible = filterStatus ? zones.filter((z) => z.status === filterStatus) : zones
+    const visibleZoneIds = new Set(visible.map((z) => z.id))
+    // Chỉ vẽ vùng tô thuộc zone đang hiển thị — tránh lọc «Đang thi công» mà vẫn thấy mark cam/xanh của zone khác
+    const marksToDraw = filterStatus ? marks.filter((m) => visibleZoneIds.has(m.zone_id)) : marks
 
     for (const zone of visible) {
       const pts = toAbsPoints(zone.geometry_pct, widthPx, heightPx)
@@ -290,7 +336,7 @@ function ShareCanvas({ layerId, widthPx, heightPx, zones, marks, filterStatus, o
       }))
     }
 
-    for (const mark of marks) {
+    for (const mark of marksToDraw) {
       const pts = toAbsPoints(mark.geometry_pct, widthPx, heightPx)
       if (pts.length < 2) continue
       const color = MARK_STATUS_COLOR[mark.status] ?? '#F59E0B'
@@ -353,8 +399,7 @@ function ShareCanvas({ layerId, widthPx, heightPx, zones, marks, filterStatus, o
   return (
     <div
       ref={outerRef}
-      className="relative overflow-hidden bg-neutral-800"
-      style={{ width: '100%', height: '100%' }}
+      className="absolute inset-0 overflow-hidden bg-neutral-800"
       onMouseDown={onMouseDown} onMouseMove={onMouseMove} onMouseUp={stopPan} onMouseLeave={stopPan}
     >
       {/* Inner container — centered, sized to layer dimensions, zoom+pan via transform */}
@@ -379,7 +424,7 @@ function ShareCanvas({ layerId, widthPx, heightPx, zones, marks, filterStatus, o
               return (
                 <img
                   key={`${col}_${row}`}
-                  src={`/api/v1/layers/${layerId}/tiles/0/${col}/${row}`}
+                  src={tileUrl(layerId, col, row)}
                   alt=""
                   draggable={false}
                   style={{
@@ -449,16 +494,23 @@ export default function ShareView() {
   const [zonePopup, setZonePopup] = useState<{ zone: Zone; x: number; y: number } | null>(null)
 
   useEffect(() => {
-    if (!token) return
+    if (!token) {
+      setLoading(false)
+      return
+    }
     const load = async () => {
       try {
         const resp = await publicClient.get(`/share/${token}`)
-        const data = (resp.data as { success: boolean; data: ShareData }).data
+        const body = resp.data as { success?: boolean; data?: ShareData }
+        const data = body?.data
+        if (!data || !Array.isArray(data.layers)) {
+          setLoadError('Dữ liệu liên kết không đúng định dạng.')
+          return
+        }
         setShareData(data)
 
         // Chọn layer ready đầu tiên
-        const firstReady = (data.layers ?? []).find((l) => l.status === 'ready')
-          ?? data.layers?.[0]
+        const firstReady = data.layers.find((l) => l.status === 'ready') ?? data.layers[0]
         if (firstReady) setSelectedLayerId(firstReady.id)
       } catch (err) {
         setLoadError(parseApiError(err, 'Link chia sẻ không hợp lệ hoặc đã hết hạn.'))
@@ -473,7 +525,14 @@ export default function ShareView() {
   const selectedLayer = (shareData?.layers ?? []).find((l) => l.id === selectedLayerId) ?? null
   const zones: Zone[] = (selectedLayer?.zones ?? []).map(normalizeZone)
   const marks: Mark[] = (selectedLayer?.zones ?? []).flatMap((z) =>
-    (z.marks ?? []).map(normalizeMark),
+    (z.marks ?? []).map((m) =>
+      normalizeMark({
+        ...m,
+        zone_id: z.id,
+        painted_by: null,
+        updated_at: null,
+      }),
+    ),
   )
 
   // ── Loading / Error states ────────────────────────────────────────────────
@@ -499,16 +558,20 @@ export default function ShareView() {
     )
   }
 
-  const canRender =
-    selectedLayer !== null &&
-    selectedLayer.status === 'ready' &&
-    (selectedLayer.width_px ?? 0) > 0 &&
-    (selectedLayer.height_px ?? 0) > 0
+  const canRender = selectedLayer !== null && selectedLayer.status === 'ready'
+  const widthPx =
+    selectedLayer != null && (selectedLayer.width_px ?? 0) > 0
+      ? selectedLayer.width_px!
+      : DEFAULT_LAYER_WIDTH_PX
+  const heightPx =
+    selectedLayer != null && (selectedLayer.height_px ?? 0) > 0
+      ? selectedLayer.height_px!
+      : DEFAULT_LAYER_HEIGHT_PX
 
   return (
-    <div className="flex min-h-screen flex-col bg-gray-50">
+    <div className="flex min-h-screen min-h-dvh flex-col bg-gray-50">
       {/* Header */}
-      <header className="border-b bg-white px-6 py-3 shadow-sm">
+      <header className="shrink-0 border-b bg-white px-6 py-3 shadow-sm">
         <div className="flex items-center justify-between">
           <div>
             <p className="text-xs font-medium uppercase tracking-wide text-gray-400">TienDo</p>
@@ -549,73 +612,83 @@ export default function ShareView() {
       </header>
 
       {/* Stats bar */}
-      <ShareStatsBar zones={zones} />
+      <div className="shrink-0">
+        <ShareStatsBar zones={zones} />
+      </div>
 
-      {/* Canvas */}
-      <div className="relative flex-1" style={{ height: 'calc(100vh - 160px)' }}>
-        {canRender ? (
-          <ShareCanvas
-            key={selectedLayer!.id}
-            layerId={selectedLayer!.id}
-            widthPx={selectedLayer!.width_px!}
-            heightPx={selectedLayer!.height_px!}
-            zones={zones}
-            marks={marks}
-            filterStatus={filterStatus}
-            onZoneClick={(zone, x, y) => setZonePopup({ zone, x, y })}
-          />
-        ) : (
-          <div className="flex h-full items-center justify-center bg-neutral-800 text-neutral-400">
-            {!selectedLayerId
-              ? 'Chọn bản vẽ ở trên để xem'
-              : selectedLayer?.status === 'processing'
-                ? 'Bản vẽ đang được xử lý...'
-                : 'Bản vẽ chưa sẵn sàng'}
-          </div>
-        )}
-
-        {/* ZoneInfoPopup */}
-        {zonePopup ? (
-          <div className="absolute z-50" style={{
-            top: Math.min(zonePopup.y - 65, window.innerHeight - 300),
-            left: Math.min(zonePopup.x + 8, window.innerWidth - 260),
-          }}>
-            <ShareZoneInfoPopup zone={zonePopup.zone} onClose={() => setZonePopup(null)} />
-          </div>
-        ) : null}
-
-        {/* Filter chips */}
-        <div className="absolute left-4 top-4 z-10 flex flex-wrap gap-1">
-          <button type="button" onClick={() => setFilterStatus(null)}
-            className={`rounded-full border px-2.5 py-0.5 text-xs font-medium backdrop-blur-sm ${
-              !filterStatus ? 'border-transparent bg-gray-900 text-white' : 'bg-white/80 text-gray-700 hover:bg-white'
-            }`}>
-            Tất cả
-          </button>
-          {ZONE_STATUS.map((s) => (
-            <button key={s} type="button"
-              onClick={() => setFilterStatus(filterStatus === s ? null : s)}
-              style={filterStatus === s ? { backgroundColor: ZONE_STATUS_COLOR[s], color: '#fff', borderColor: 'transparent' } : {}}
-              className={`rounded-full border px-2.5 py-0.5 text-xs font-medium backdrop-blur-sm ${
-                filterStatus === s ? '' : 'bg-white/80 text-gray-700 hover:bg-white'
-              }`}>
-              {STATUS_LABELS[s]}
-            </button>
-          ))}
-        </div>
-
-        {/* Legend */}
-        <div className="absolute bottom-4 right-4 z-10 flex flex-col gap-1 rounded-lg border bg-white/90 p-2 text-xs shadow-md backdrop-blur-sm">
-          {ZONE_STATUS.map((s) => (
-            <div key={s} className="flex items-center gap-2 text-gray-600">
-              <span className="h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: ZONE_STATUS_COLOR[s] }} />
-              {STATUS_LABELS[s]}
+      {/*
+        flex-1 + flex-basis 0 + min-h-0: vùng canvas có chiều cao thực (tránh % height = 0 → trắng).
+        Lớp absolute inset-0: ShareCanvas luôn fill vùng này.
+      */}
+      <div
+        className="relative min-h-0 w-full flex-1 overflow-hidden"
+        style={{ flex: '1 1 0%', minHeight: 0 }}
+      >
+        <div className="absolute inset-0 min-h-[240px]">
+          {canRender ? (
+            <ShareCanvas
+              key={selectedLayer!.id}
+              layerId={selectedLayer!.id}
+              widthPx={widthPx}
+              heightPx={heightPx}
+              zones={zones}
+              marks={marks}
+              filterStatus={filterStatus}
+              onZoneClick={(zone, x, y) => setZonePopup({ zone, x, y })}
+            />
+          ) : (
+            <div className="flex h-full min-h-[240px] items-center justify-center bg-neutral-800 text-neutral-400">
+              {!selectedLayerId
+                ? 'Chọn bản vẽ ở trên để xem'
+                : selectedLayer?.status === 'processing'
+                  ? 'Bản vẽ đang được xử lý...'
+                  : 'Bản vẽ chưa sẵn sàng'}
             </div>
-          ))}
+          )}
+
+          {/* ZoneInfoPopup */}
+          {zonePopup ? (
+            <div className="absolute z-50" style={{
+              top: Math.min(zonePopup.y - 65, window.innerHeight - 300),
+              left: Math.min(zonePopup.x + 8, window.innerWidth - 260),
+            }}>
+              <ShareZoneInfoPopup zone={zonePopup.zone} onClose={() => setZonePopup(null)} />
+            </div>
+          ) : null}
+
+          {/* Filter chips */}
+          <div className="absolute left-4 top-4 z-10 flex flex-wrap gap-1">
+            <button type="button" onClick={() => setFilterStatus(null)}
+              className={`rounded-full border px-2.5 py-0.5 text-xs font-medium backdrop-blur-sm ${
+                !filterStatus ? 'border-transparent bg-gray-900 text-white' : 'bg-white/80 text-gray-700 hover:bg-white'
+              }`}>
+              Tất cả
+            </button>
+            {ZONE_STATUS.map((s) => (
+              <button key={s} type="button"
+                onClick={() => setFilterStatus(filterStatus === s ? null : s)}
+                style={filterStatus === s ? { backgroundColor: ZONE_STATUS_COLOR[s], color: '#fff', borderColor: 'transparent' } : {}}
+                className={`rounded-full border px-2.5 py-0.5 text-xs font-medium backdrop-blur-sm ${
+                  filterStatus === s ? '' : 'bg-white/80 text-gray-700 hover:bg-white'
+                }`}>
+                {STATUS_LABELS[s]}
+              </button>
+            ))}
+          </div>
+
+          {/* Legend */}
+          <div className="absolute bottom-4 right-4 z-10 flex flex-col gap-1 rounded-lg border bg-white/90 p-2 text-xs shadow-md backdrop-blur-sm">
+            {ZONE_STATUS.map((s) => (
+              <div key={s} className="flex items-center gap-2 text-gray-600">
+                <span className="h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: ZONE_STATUS_COLOR[s] }} />
+                {STATUS_LABELS[s]}
+              </div>
+            ))}
+          </div>
         </div>
       </div>
 
-      <footer className="border-t bg-white px-6 py-2 text-center text-xs text-gray-400">
+      <footer className="shrink-0 border-t bg-white px-6 py-2 text-center text-xs text-gray-400">
         Powered by <strong>TienDo</strong> — Quản lý tiến độ thi công
       </footer>
     </div>

@@ -1,7 +1,78 @@
 # SESSION-LOG.md — TienDo
 
 ## Current Session
-<!-- Ghi trong lúc làm việc. Cleared sau mỗi git commit. -->
+
+### Session: 2026-03-22 — Tab title (`document.title`) theo route
+
+**Task**
+
+- Tab trình duyệt mặc định **frontend** (Vite) → đổi thành **tiêu đề ngắn theo hành động** từng route; mặc định / không khớp → **TienDo**.
+
+**Files changed**
+
+| File | Thay đổi |
+|------|-----------|
+| `frontend/index.html` | `<title>frontend</title>` → `TienDo` |
+| `frontend/src/lib/documentTitle.ts` | **Mới:** `APP_TAB_NAME`, `titleForPathname()`, `DocumentTitleSync` (`useLocation` + `useEffect` → `document.title`) |
+| `frontend/src/App.tsx` | Trong `<BrowserRouter>` render `<DocumentTitleSync />` |
+
+**Approach & tại sao chọn**
+
+- **Không** thêm `react-helmet-async` — chỉ `document.title` + React Router; giảm dependency, đủ UX tab.
+- **`titleForPathname`**: regex pathname theo thứ tự **route sâu trước** (…/editor, …/progress, …/view) rồi mới `projects/:id`, tránh khớp nhầm.
+- **`DocumentTitleSync`**: component side-effect (`return null`), đặt **bên trong** `BrowserRouter` để mọi lần đổi URL đều sync title.
+
+**Decisions quan trọng**
+
+- Format tab: **`Hành động · TienDo`** (tiếng Việt ngắn, đồng bộ yêu cầu “đúng action”).
+- Tên app tập trung ở **`APP_TAB_NAME`** trong `documentTitle.ts` + fallback `index.html`.
+
+**Đã thử / fail**
+
+- Không thử Helmet — tính năng chỉ cần đổi title động; SEO/meta OG không nằm trong scope lần này.
+
+**Claude AI Web cần biết**
+
+- Thêm/sửa route → cập nhật **`titleForPathname()`** (`frontend/src/lib/documentTitle.ts`).
+- Nếu sau này Vite **`base`** khác `/`, có thể cần chuẩn hoá pathname (strip base) trước khi regex.
+
+**Verify**
+
+- `npm run lint` — 0 error.
+
+---
+
+### Session: 2026-03-22 — Gộp SESSION-LOG + template Current Session
+
+**Task**
+
+- **Lần 1 (yêu cầu trước):** Rà soát toàn bộ thread QA CanvasProgress / Share / Excel / WSL; **gộp** nhiều mục `### Session: 2026-03-17` lặp trong `## Current Session` thành **một** block **«Tổng hợp QA»** theo template: Task đánh số theo thứ tự xử lý, bảng **Files changed**, **Decisions**, **Đã thử / fail**, **Claude AI Web cần biết**, **Verify**.
+- **Lần 2 (phiên này):** Tóm tắt lại conversation và **ghi log** với tiêu đề session theo **ngày hiện tại** (`2026-03-22`).
+
+**Files changed**
+
+| File | Thay đổi |
+|------|-----------|
+| `SESSION-LOG.md` | Chỉnh `## Current Session`: gộp / chuẩn hoá block log; thêm mục session **2026-03-22** (meta). |
+
+**Decisions**
+
+- Log **meta** (chỉnh SESSION-LOG) tách riêng session **theo ngày ghi**, không trộn vào các session feature cũ trừ khi đang gộp lịch sử cùng một đợt QA.
+
+**Đã thử / fail**
+
+- Lần **search_replace** gộp session đầu tiên **fail** khi `old_string` không khớp 100% (ví dụ đường dẫn `frontend/lib/...` vs `frontend/src/lib/...` trong block cũ) → cần copy đúng nội dung file hiện tại rồi replace.
+
+**Claude AI Web cần biết**
+
+- Chi tiết code CanvasProgress / Share link / Excel import / `normalizeMark`… đã có trong **Sprint Commit History** (`fix: canvas-progress-…`, `share-link-…`, `excel-import-…`, v.v.) và/hoặc block gộp **2026-03-17** nếu vẫn giữ trong repo.
+- `SESSION-LOG.md`: mục **Current Session** được clear sau mỗi git commit (ghi chú đầu section).
+
+**Verify**
+
+- Đọc lại `SESSION-LOG.md` — `## Current Session` có `### Session: 2026-03-22` và cấu trúc template đầy đủ.
+
+---
 
 ### Session: 2026-03-20 — CommentsTab multipart (TEST 7.3 / 7.4) + ghi log
 
@@ -390,3 +461,4 @@
 | fix: zone-save-toast + invalid-transition-copy | **TEST 6.1 + 6.3**: (1) **Lưu zone** — "Đang lưu" biến mất quá nhanh + cần popup rõ ràng → `ZoneDetailPanel`: giữ loading tối thiểu 550ms sau API; toast thành công `createPortal` vào `document.body`, `z-[10050]`, card trắng + icon CheckCircle2 + 2 dòng mô tả, ~4.2s, `aria-live=polite`; cleanup timeout khi đổi zone/unmount. (2) **INVALID_STATE_TRANSITION** — câu tiếng Việt đầy đủ cho khách (không nhảy cóc trạng thái); nếu chuỗi kỹ thuật lọt trong `details` thì map sang cùng nội dung. Files: `parseApiError.ts`, `CanvasEditor.tsx`. Lint 0 error, build 0 error. | — |
 | fix: comments-tab-multipart-images | **TEST 7.3 + 7.4**: (1) **Thumbnail 404 / URL sai** — `GET /comments/{id}/images/{filename}` chỉ khớp **một** segment; nếu ghép `comments/2/uuid.png` vào path thì route lệch → 404 NOT_FOUND. Fix: `commentImageBasename()` lấy tên file cuối + `encodeURIComponent` cho segment; key React `c.id + img`. (2) **Chỉ ảnh → Validation failed** — gửi `FormData` với `headers: { 'Content-Type': 'multipart/form-data' }` **không có boundary** → Laravel không nhận file → chỉ lưu text / lỗi validation. Fix: **bỏ** header, để axios/browser gắn boundary. (3) **6 ảnh** — thống nhất `MAX_IMAGES_PER_COMMENT = 5`, lỗi "Tối đa 5 ảnh mỗi bình luận.", reset `files` + input khi quá 5; disable nút Gửi khi `files.length > 5`. Bonus: `ProjectDetail` Excel import + upload PDF — bỏ cùng header multipart. Lint 0 error, build 0 error. | — |
 | docs: session-log-2026-03-20-comments | **SESSION-LOG**: thêm mục **Current Session** (task TEST 7.3/7.4, files, approach, decisions, fail, context cho Claude Web); 1 dòng tóm tắt = fix comments multipart + URL basename + không set Content-Type FormData + cap 5 ảnh + sync PROJECT-STATUS. | — |
+| ux: document-title-per-route | **Tab trình duyệt theo route**: `index.html` mặc định **TienDo**; `src/lib/documentTitle.ts` — `titleForPathname()` + `DocumentTitleSync` trong `App.tsx` (`useLocation` → `document.title`: Đăng nhập / Dự án / Chi tiết dự án / Soạn bản vẽ / Tiến độ / Xem bản vẽ / Thông báo / Người dùng / Xem chia sẻ). Không dùng react-helmet; regex pathname từ cụ thể → chung. Lint 0 error. | — |

@@ -743,16 +743,20 @@ function MembersTab({
 
 // ─── ExcelImportModal ──────────────────────────────────────────────────────────
 
+/** Khớp `preview_data` từ API ExcelImportService */
 type PreviewRow = {
   row: number
   zone_code: string
   found: boolean
-  match_type: string | null
-  current_status: string | null
-  new_status: string | null
-  completion_pct: number | null
-  deadline: string | null
-  notes: string | null
+  match_type?: string | null
+  current_status?: string | null
+  new_status?: string | null
+  current_completion_pct?: number | null
+  new_completion_pct?: number | null
+  current_assignee?: string | null
+  new_assignee?: string | null
+  new_deadline?: string | null
+  new_notes?: string | null
 }
 
 type ExcelImportResult = {
@@ -838,39 +842,63 @@ function ExcelImportModal({
   const notFoundRows = preview.filter((r) => !r.found)
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4">
-      <div className="flex w-full max-w-3xl flex-col rounded-xl border bg-card shadow-2xl"
-        style={{ maxHeight: '90vh' }}>
+    <div
+      className="fixed inset-0 z-[9999] flex items-center justify-center bg-[#0F172A]/55 p-4 backdrop-blur-sm"
+      role="presentation"
+      onClick={onClose}
+    >
+      <div
+        className="flex w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-[#E2E8F0] bg-white shadow-[0_25px_50px_-12px_rgba(15,23,42,0.35)]"
+        style={{ maxHeight: '90vh' }}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="excel-import-modal-title"
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* Header */}
-        <div className="flex items-center justify-between border-b px-5 py-4">
-          <div>
-            <h2 className="font-semibold">Nhập Excel</h2>
-            <p className="text-xs text-muted-foreground">{layerName}</p>
+        <div className="border-b border-[#E2E8F0] bg-[#F8FAFC] px-5 py-4">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 border-l-4 border-[#FF7F29] pl-3">
+              <h2 id="excel-import-modal-title" className="text-lg font-semibold text-[#0F172A]">
+                Nhập Excel
+              </h2>
+              <p className="mt-0.5 truncate text-xs text-[#64748B]">{layerName}</p>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="shrink-0 rounded-md p-1.5 text-[#64748B] hover:bg-[#E2E8F0]/80"
+              aria-label="Đóng"
+            >
+              ✕
+            </button>
           </div>
-          <button type="button" onClick={onClose}
-            className="rounded-md p-1 text-muted-foreground hover:bg-muted">
-            ✕
-          </button>
         </div>
 
         {/* Steps indicator */}
-        <div className="flex border-b text-xs">
+        <div className="flex border-b border-[#E2E8F0] bg-white text-xs">
           {(['upload', 'preview', 'applied'] as Stage[]).map((s, i) => (
-            <div key={s}
-              className={`flex-1 py-2.5 text-center font-medium ${stage === s ? 'border-b-2 border-primary text-primary' : 'text-muted-foreground'}`}>
+            <div
+              key={s}
+              className={`flex-1 py-2.5 text-center font-medium ${
+                stage === s
+                  ? 'border-b-2 border-[#FF7F29] text-[#0F172A]'
+                  : 'text-[#64748B]'
+              }`}
+            >
               {i + 1}. {s === 'upload' ? 'Chọn file' : s === 'preview' ? 'Xem trước' : 'Hoàn tất'}
             </div>
           ))}
         </div>
 
         {/* Body */}
-        <div className="min-h-0 flex-1 overflow-y-auto p-5">
+        <div className="min-h-0 flex-1 overflow-y-auto bg-white p-5 text-[#0F172A]">
 
           {/* ── Stage 1: Upload ── */}
           {stage === 'upload' ? (
             <div className="space-y-4">
-              <div className="rounded-lg border-2 border-dashed p-6 text-center">
-                <p className="mb-3 text-sm font-medium">Chọn file Excel (.xlsx)</p>
+              <div className="rounded-xl border-2 border-dashed border-[#CBD5E1] bg-[#F8FAFC] p-6 text-center">
+                <p className="mb-3 text-sm font-medium text-[#0F172A]">Chọn file Excel (.xlsx)</p>
                 <input
                   ref={fileRef}
                   type="file"
@@ -881,7 +909,7 @@ function ExcelImportModal({
                 <button
                   type="button"
                   onClick={() => fileRef.current?.click()}
-                  className="rounded-md border px-4 py-2 text-sm hover:bg-muted"
+                  className="rounded-lg border border-[#E2E8F0] bg-white px-4 py-2 text-sm font-medium text-[#0F172A] shadow-sm transition hover:border-[#FF7F29]/70 hover:text-[#FF7F29]"
                 >
                   📂 Chọn file
                 </button>
@@ -891,12 +919,19 @@ function ExcelImportModal({
               </div>
 
               {/* Format hint */}
-              <div className="rounded-lg border bg-muted/30 p-4 text-xs text-muted-foreground space-y-1">
-                <p className="font-medium text-foreground mb-1">Định dạng template chuẩn:</p>
-                <p>Cột 1: Mã khu vực (zone_code) — dùng để khớp zone</p>
-                <p>Cột 3: Trạng thái (not_started / in_progress / completed / delayed / paused)</p>
-                <p>Cột 4: Tiến độ (%) — số từ 0–100</p>
-                <p>Cột 6: Deadline — định dạng YYYY-MM-DD</p>
+              <div className="space-y-1 rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] p-4 text-xs text-[#64748B]">
+                <p className="mb-1 font-medium text-[#0F172A]">Định dạng template chuẩn:</p>
+                <p>Cột 1: Mã khu vực — khớp zone</p>
+                <p>Cột 2: Tên (xuất từ hệ thống; import không đổi tên qua file)</p>
+                <p>
+                  Cột 3: Trạng thái — nhãn tiếng Việt như export hoặc mã (not_started, in_progress…)
+                </p>
+                <p>Cột 4: Tiến độ (%) — 0–100</p>
+                <p>
+                  Cột 5: <strong>Phụ trách</strong> — cập nhật trường «Giao cho» (assignee) trên zone khi áp dụng
+                </p>
+                <p>Cột 6: Deadline — ngày (Excel hoặc YYYY-MM-DD)</p>
+                <p>Cột 7: Hạng mục (tasks) — import MVP chưa đổi cột này</p>
                 <p>Cột 8: Ghi chú</p>
                 <p className="mt-2 text-amber-600 font-medium">
                   ⚠ Chỉ cập nhật zone đã có — KHÔNG tạo zone mới từ Excel.
@@ -923,15 +958,16 @@ function ExcelImportModal({
               </div>
 
               {/* Preview table */}
-              <div className="overflow-x-auto rounded-lg border text-xs">
-                <table className="min-w-full">
-                  <thead className="bg-muted/40 text-left">
+              <div className="overflow-x-auto rounded-xl border border-[#E2E8F0] text-xs">
+                <table className="min-w-full text-[#0F172A]">
+                  <thead className="bg-[#F1F5F9] text-left text-[#334155]">
                     <tr>
                       <th className="px-3 py-2 font-medium">Dòng</th>
                       <th className="px-3 py-2 font-medium">Mã khu vực</th>
                       <th className="px-3 py-2 font-medium">Trạng thái cũ</th>
                       <th className="px-3 py-2 font-medium">Trạng thái mới</th>
-                      <th className="px-3 py-2 font-medium">Tiến độ</th>
+                      <th className="px-3 py-2 font-medium">Tiến độ (%)</th>
+                      <th className="px-3 py-2 font-medium">Phụ trách → Giao cho</th>
                       <th className="px-3 py-2 font-medium">Deadline</th>
                       <th className="px-3 py-2 font-medium">Ghi chú</th>
                     </tr>
@@ -952,9 +988,42 @@ function ExcelImportModal({
                             ? STATUS_VI[row.new_status] ?? row.new_status
                             : '—'}
                         </td>
-                        <td className="px-3 py-2">{row.completion_pct != null ? `${row.completion_pct}%` : '—'}</td>
-                        <td className="px-3 py-2">{row.deadline ?? '—'}</td>
-                        <td className="px-3 py-2 max-w-[120px] truncate">{row.notes ?? '—'}</td>
+                        <td className="px-3 py-2 whitespace-nowrap">
+                          {row.found ? (
+                            <span>
+                              <span className="text-[#64748B]">{row.current_completion_pct ?? '—'}%</span>
+                              <span className="mx-1 text-[#94A3B8]">→</span>
+                              <span className="font-medium">
+                                {row.new_completion_pct != null ? `${row.new_completion_pct}%` : '—'}
+                              </span>
+                            </span>
+                          ) : (
+                            '—'
+                          )}
+                        </td>
+                        <td className="px-3 py-2 max-w-[140px]">
+                          {row.found ? (
+                            <span className="block truncate" title={row.new_assignee ?? ''}>
+                              {row.new_assignee != null && row.new_assignee !== '' ? (
+                                <>
+                                  <span className="text-[#64748B] truncate block">
+                                    {row.current_assignee?.trim() ? row.current_assignee : '—'}
+                                  </span>
+                                  <span className="text-[#94A3B8]">→ </span>
+                                  <span className="font-medium">{row.new_assignee}</span>
+                                </>
+                              ) : (
+                                <span className="text-[#64748B]">{row.current_assignee?.trim() || '—'}</span>
+                              )}
+                            </span>
+                          ) : (
+                            '—'
+                          )}
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap">{row.new_deadline ?? '—'}</td>
+                        <td className="px-3 py-2 max-w-[140px] truncate" title={row.new_notes ?? ''}>
+                          {row.new_notes?.trim() ? row.new_notes : '—'}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -1001,7 +1070,7 @@ function ExcelImportModal({
         </div>
 
         {/* Footer actions */}
-        <div className="flex justify-end gap-2 border-t px-5 py-4">
+        <div className="flex justify-end gap-2 border-t border-[#E2E8F0] bg-[#F8FAFC] px-5 py-4">
           {stage === 'upload' ? (
             <>
               <button type="button" onClick={onClose}

@@ -19,9 +19,27 @@ interface PolygonLayerProps {
 
 // ─── Helpers (module-level, no closure issues) ──────────────────────────────
 
+function toAbsPoint(p: unknown, w: number, h: number): fabric.Point | null {
+  if (Array.isArray(p) && p.length >= 2) {
+    const px = Number(p[0])
+    const py = Number(p[1])
+    if (!Number.isFinite(px) || !Number.isFinite(py)) return null
+    return new fabric.Point(px * w, py * h)
+  }
+  if (p && typeof p === 'object' && 'x' in p && 'y' in p) {
+    const px = Number((p as { x: unknown }).x)
+    const py = Number((p as { y: unknown }).y)
+    if (!Number.isFinite(px) || !Number.isFinite(py)) return null
+    return new fabric.Point(px * w, py * h)
+  }
+  return null
+}
+
 function toAbsPoints(geometry: Geometry, w: number, h: number): fabric.Point[] {
   if (geometry.type === 'polygon' && geometry.points) {
-    return geometry.points.map(([px, py]) => new fabric.Point(px * w, py * h))
+    return (geometry.points as unknown[])
+      .map((p) => toAbsPoint(p, w, h))
+      .filter((pt): pt is fabric.Point => pt !== null)
   }
   if (geometry.type === 'rect') {
     const { x = 0, y = 0, width = 0, height = 0 } = geometry

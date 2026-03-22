@@ -1,7 +1,19 @@
 # PROJECT-STATUS.md — TienDo
 > File này dùng để upload lên Claude AI Web / Project để AI giữ context xuyên phiên.
 > Cập nhật sau mỗi session. Source of truth: SPEC.md + CLAUDE.md.
-> **Ngày cập nhật:** 2026-03-21
+> **Ngày cập nhật:** 2026-03-22
+
+---
+
+## 0. Tiến độ gần nhất (snapshot)
+
+| Ngày | Nội dung |
+|------|-----------|
+| **2026-03-22** | **Docs:** `SESSION-LOG.md` — gộp / chuẩn hoá `## Current Session` theo template; thêm session meta **2026-03-22** (quy trình ghi log). |
+| **2026-03-20** | **CommentsTab (TEST 7.3 / 7.4):** URL ảnh comment = `commentImageBasename` + encode; không set `Content-Type` multipart thủ công; chặn &gt; 5 ảnh với thông báo rõ. **PROJECT-STATUS** § Gotchas đã đồng bộ (phiên 2026-03-20). |
+| **2026-03 (QA E2E)** | **CanvasProgress / field_team:** popup tiến độ chỉ **`PATCH /api/v1/zones/{id}/status`** (`status` + `completion_pct`); backend **`transitionInPlace`** (cùng `status`) + **`in_progress` + 100%** → tự chuyển **`completed`**. **`canvasStore`:** `addMark`/`updateMark` bọc **`normalizeMark`**; **`fetchZonesAndMarks`** reset **`filterStatus: null`**. **`parseApiError`:** `FORBIDDEN` / 401 → tiếng Việt. **Share:** `FRONTEND_URL` + redirect `web.php`; **ShareView / CanvasView:** marks theo **`zone_id`** khi lọc chip. **Excel:** preview `new_*`; cột 5 → **assignee**. |
+
+*Chi tiết commit / file: `SESSION-LOG.md` (Sprint Commit History + Current Session).*
 
 ---
 
@@ -132,7 +144,7 @@ HEALTH
 | `ProjectDetail.tsx` | `/projects/:id` | 1+3 | ✅ Bento grid stats với Lucide icons (Layers/CheckCircle2/HardHat/AlertTriangle/PauseCircle/TrendingUp); project header Building2 + MapPin; ChevronLeft breadcrumb; Tab Mặt bằng + Thành viên + Cài đặt |
 | `AdminUsers.tsx` | `/admin/users` | 1 | ✅ Table + inline edit (GET/PUT /users), admin-only guard |
 | `CanvasEditor.tsx` | `/projects/:id/layers/:id/editor` | 1+2 | ✅ ChevronLeft breadcrumb; sidebar zone items rounded-lg; ZoneDetailPanel: dropdown "Giao cho"; CommentsTab: FormData multipart đúng + URL ảnh `commentImageBasename` + encode; ZoneCreateModal overlay brand; lưu zone: toast portal + min delay "Đang lưu..." |
-| `CanvasProgress.tsx` | `/projects/:id/layers/:id/progress` | 1+2 | ✅ Own-zone highlight, StatusPopup, mark draw, MarkPopup — responsive drawer sidebar |
+| `CanvasProgress.tsx` | `/projects/:id/layers/:id/progress` | 1+2 | ✅ Own-zone highlight, StatusPopup (**lưu** qua `PATCH .../zones/{id}/status` + `completion_pct`, không `PUT` field_team), mark draw, MarkPopup — responsive drawer sidebar; `toAbsPoints` / polygon an toàn |
 | `CanvasView.tsx` | `/projects/:id/layers/:id/view` | 1+2 | ✅ Read-only, StatsBar, filter chips, Export Excel; `onZoneClick` = `useCallback` (tránh mất zone khi mở popup) |
 | `ShareView.tsx` | `/share/:token` | 1 | ✅ Public (no auth), layer selector, canvas read-only |
 | `Notifications.tsx` | `/notifications` | 2 | ✅ BellOff empty state; icon per type (Bell/Clock); unread bg-[#FFF3E8] border cam; "Đọc tất cả" CheckCheck icon |
@@ -165,7 +177,7 @@ HEALTH
 
 #### Bug fixes P1 (blocking):
 
-- **B1 `CanvasProgress` 405**: `PATCH /zones/{id}` không tồn tại → đổi sang `PUT /zones/{id}` với body `{ name, completion_pct }` để cập nhật tiến độ mà không đổi status
+- **B1 `CanvasProgress` tiến độ / quyền field_team**: `PUT /zones/{id}` cho đội hiện trường → **403** (policy). **Fix hiện tại:** `StatusPopup` chỉ gọi **`PATCH /zones/{id}/status`** với `status` (giữ nguyên) + `completion_pct`; backend **`ZoneService::transitionInPlace`** cho phép cập nhật % cùng trạng thái; **`in_progress` + 100%** → chuyển **`completed`**. (PM/admin vẫn có thể `PUT /zones/{id}` khi policy cho phép — ví dụ CanvasEditor.)
 - **B2 `CanvasProgress` marks 422**: geometry_pct gửi `[x,y][]` tuple → backend expect `{x,y}[]` → thêm `toApiGeometry()` helper, dùng trước khi POST `/zones/{id}/marks`
 - **B3 `ShareView` flatMap crash**: `master_layers` / `ml.layers` có thể undefined từ API → thêm `?? []` guard ở 2 chỗ. Bonus: fix tile URL `0_x_y.jpg` → `0/x/y`
 - **B4 `ExcelImportModal` length crash**: `applyResult.errors` từ API có thể `null` → `(applyResult.errors ?? []).length` và `.map()`
@@ -176,7 +188,7 @@ HEALTH
 #### Sprint 3 — Tính năng bổ sung:
 
 - **SettingsTab** (ProjectDetail): form edit project info (name/description/address), Share Link management (create/copy/revoke), Export Excel qua Axios blob download (auth header được gửi đúng — không dùng `<a href>`)
-- **ExcelImportModal**: 3-stage workflow (Upload → Preview → Applied); khi đóng từ stage Applied gọi `fetchZonesAndMarks(layerId)` để refresh canvas nếu đang mở layer đó
+- **ExcelImportModal**: 3-stage workflow (Upload → Preview → Applied); khi đóng từ stage Applied gọi `fetchZonesAndMarks(layerId)` để refresh canvas nếu đang mở layer đó; bảng preview đọc `new_completion_pct`, `new_deadline`, `new_notes`, `new_assignee` từ API (không dùng tên field cũ). **Import**: cột 5 «Phụ trách» → `zones.assignee` (UI «Giao cho»). **`fetchZonesAndMarks`** reset `filterStatus` để chip lọc canvas không kẹt trạng thái cũ sau import / vào layer
 
 #### Bug fixes (post-brand):
 
@@ -186,7 +198,9 @@ HEALTH
 
 - **`parseApiError.ts`**: API Laravel trả `error.code: VALIDATION_ERROR` (không phải `VALIDATION_FAILED`) + `details` — gom message từng field; duplicate project code → hiển thị đúng message từ `details`
 - **`App.tsx`**: route `/share/:token` render ngay, không chặn bởi `authStore.loading` (tab ẩn danh)
-- **`ShareView.tsx`**: cấu trúc `data.layers[]` (không `master_layers`); không gọi endpoint zones/marks riêng; Fabric nền trong suốt + tiles sibling
+- **`ShareView.tsx`**: cấu trúc `data.layers[]` (không `master_layers`); không gọi endpoint zones/marks riêng; Fabric nền trong suốt + tiles sibling; **tile `<img>`** dùng `tileUrl()` cùng `API_BASE` / `VITE_API_BASE_URL` như `publicClient` (tránh ẩn danh trắng khi API tách domain); geometry null-safe + fallback `width_px`/`height_px`; layout flex `1 1 0%` + `min-h-0` + canvas `absolute inset-0`
+- **Share link URL**: `ShareLinkResource` dùng `FRONTEND_URL` (config `app.frontend_url`); dev WSL: `APP_URL=:8000` + `FRONTEND_URL=http://localhost:5173`. Nếu mở nhầm `:8000/share/...`, `routes/web.php` redirect sang SPA khi hai URL khác nhau
+- **ShareView / CanvasView**: chip lọc theo trạng thái zone — **vùng tô (marks)** chỉ hiện khi thuộc zone đang được lọc (cùng `zone_id`), tránh chồng mark cam/xanh lên zone trạng thái khác
 - **`ProjectList` CreateProjectModal**: validation message từ API qua `parseApiError`
 - **`ZoneCreateModal`**: overlay + card brand (TEST 5.7)
 

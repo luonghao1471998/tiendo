@@ -140,6 +140,49 @@ class ZoneCrudStateMachineTest extends TestCase
             ->assertJsonPath('error.code', 'FORBIDDEN');
     }
 
+    public function test_field_team_patch_in_progress_with_completion_100_transitions_to_completed(): void
+    {
+        [$pm, $layer] = $this->createProjectManagerContext();
+
+        $field = User::factory()->create([
+            'role' => 'field_team',
+            'is_active' => true,
+        ]);
+
+        ProjectMember::query()->create([
+            'project_id' => $layer->masterLayer->project_id,
+            'user_id' => $field->id,
+            'role' => 'field_team',
+            'created_at' => now(),
+        ]);
+
+        Sanctum::actingAs($pm);
+        $zoneId = (int) $this->postJson('/api/v1/layers/'.$layer->id.'/zones', [
+            'name' => 'Giao cho field',
+            'assigned_user_id' => $field->id,
+            'geometry_pct' => [
+                'type' => 'polygon',
+                'points' => [
+                    ['x' => 0.2, 'y' => 0.2],
+                    ['x' => 0.4, 'y' => 0.2],
+                    ['x' => 0.4, 'y' => 0.4],
+                ],
+            ],
+        ])->json('data.id');
+
+        $this->patchJson('/api/v1/zones/'.$zoneId.'/status', [
+            'status' => 'in_progress',
+        ])->assertOk();
+
+        Sanctum::actingAs($field);
+        $this->patchJson('/api/v1/zones/'.$zoneId.'/status', [
+            'status' => 'in_progress',
+            'completion_pct' => 100,
+        ])->assertOk()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonPath('data.completion_pct', 100);
+    }
+
     /**
      * @return array{0: User, 1: Layer}
      */

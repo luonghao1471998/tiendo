@@ -56,6 +56,18 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | SPA / Frontend URL (React) — link chia sẻ /share/{token}
+    |--------------------------------------------------------------------------
+    |
+    | Khi dev: APP_URL=http://localhost:8000 nhưng Vite chạy :5173 — đặt FRONTEND_URL
+    | để API trả đúng URL mở được ShareView. Để trống = dùng APP_URL (cùng host prod).
+    |
+    */
+
+    'frontend_url' => env('FRONTEND_URL', ''),
+
+    /*
+    |--------------------------------------------------------------------------
     | Application Timezone
     |--------------------------------------------------------------------------
     |

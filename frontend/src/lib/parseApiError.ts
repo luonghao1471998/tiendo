@@ -3,6 +3,13 @@ const INVALID_STATE_TRANSITION_VI =
   'Không thể đổi sang trạng thái này theo quy trình thi công. ' +
   'Ví dụ: không thể chuyển từ «Chưa bắt đầu» sang «Hoàn thành» trực tiếp — cần các bước trung gian (ví dụ «Đang thi công») trước khi hoàn thành.'
 
+const FORBIDDEN_VI =
+  'Bạn không có quyền thực hiện thao tác này. ' +
+  'Ví dụ: chỉ quản lý dự án / admin mới sửa được toàn bộ thông tin khu vực (PUT); đội hiện trường chỉ được cập nhật trạng thái và tiến độ trên khu vực được giao qua màn hình Tiến độ.'
+
+const UNAUTHENTICATED_VI =
+  'Phiên đăng nhập đã hết hạn hoặc chưa đăng nhập. Vui lòng đăng nhập lại.'
+
 /**
  * parseApiError — extract a human-readable Vietnamese error message from an
  * Axios error.  Handles:
@@ -45,6 +52,16 @@ export function parseApiError(error: unknown, fallback = 'Đã xảy ra lỗi. V
 
   if (!apiErr) return fallback
 
+  // 403 — Laravel AuthorizationException → FORBIDDEN
+  if (apiErr.code === 'FORBIDDEN') {
+    return FORBIDDEN_VI
+  }
+
+  // 401
+  if (apiErr.code === 'UNAUTHENTICATED') {
+    return UNAUTHENTICATED_VI
+  }
+
   // INVALID_STATE_TRANSITION — explicit code from API (ZoneService state machine)
   if (apiErr.code === 'INVALID_STATE_TRANSITION') {
     return INVALID_STATE_TRANSITION_VI
@@ -63,6 +80,8 @@ export function parseApiError(error: unknown, fallback = 'Đã xảy ra lỗi. V
   // Generic message from API (skip useless "Validation failed." if we had no details)
   if (typeof apiErr.message === 'string' && apiErr.message) {
     const msg = apiErr.message
+    if (msg === 'This action is unauthorized.') return FORBIDDEN_VI
+    if (msg === 'Unauthenticated.') return UNAUTHENTICATED_VI
     if (msg !== 'Validation failed.') return msg
   }
 

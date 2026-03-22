@@ -23,6 +23,7 @@ class ExcelImportService
         'zone_code' => 1,
         'status' => 3,
         'completion_pct' => 4,
+        'assignee' => 5,
         'deadline' => 6,
         'notes' => 8,
     ];
@@ -137,6 +138,11 @@ class ExcelImportService
                     $changes['notes'] = ['from' => $zone->notes, 'to' => $row['new_notes']];
                 }
 
+                if (array_key_exists('new_assignee', $row) && $row['new_assignee'] !== null && $row['new_assignee'] !== '') {
+                    $updates['assignee'] = $row['new_assignee'];
+                    $changes['assignee'] = ['from' => $zone->assignee, 'to' => $row['new_assignee']];
+                }
+
                 if ($updates !== []) {
                     $zone->update($updates);
 
@@ -235,6 +241,9 @@ class ExcelImportService
             $rawNotes = $sheet->getCell([$mapping['notes'], $r])->getValue();
             $newNotes = ($rawNotes !== null && trim((string) $rawNotes) !== '') ? trim((string) $rawNotes) : null;
 
+            $rawAssignee = $sheet->getCell([$mapping['assignee'], $r])->getValue();
+            $newAssignee = ($rawAssignee !== null && trim((string) $rawAssignee) !== '') ? trim((string) $rawAssignee) : null;
+
             $rows[] = [
                 'row' => $r,
                 'zone_code' => $normalizedCode,
@@ -245,6 +254,8 @@ class ExcelImportService
                 'new_status' => $newStatus,
                 'current_completion_pct' => $zone?->completion_pct,
                 'new_completion_pct' => $newPct,
+                'current_assignee' => $zone?->assignee,
+                'new_assignee' => $newAssignee,
                 'new_deadline' => $newDeadline,
                 'new_notes' => $newNotes,
             ];

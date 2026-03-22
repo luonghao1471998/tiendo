@@ -94,6 +94,31 @@ class ExcelImportTest extends TestCase
         ]);
     }
 
+    public function test_apply_updates_assignee_from_phu_trach_column(): void
+    {
+        [$pm, $layer, $zone] = $this->createContext();
+        $zone->update(['assignee' => 'Cũ']);
+
+        $file = $this->makeXlsx([
+            [
+                'zone_code' => $zone->zone_code,
+                'status' => 'Đang thi công',
+                'pct' => 40,
+                'assignee' => 'Đội thi công A',
+            ],
+        ]);
+
+        Sanctum::actingAs($pm);
+        $importId = $this->postJson('/api/v1/layers/'.$layer->id.'/import', [
+            'file' => $file,
+        ])->assertStatus(201)->json('data.id');
+
+        $this->postJson('/api/v1/excel-imports/'.$importId.'/apply')->assertOk();
+
+        $zone->refresh();
+        $this->assertSame('Đội thi công A', $zone->assignee);
+    }
+
     public function test_apply_counts_not_found_correctly(): void
     {
         [$pm, $layer, $zone] = $this->createContext();
@@ -215,7 +240,7 @@ class ExcelImportTest extends TestCase
     /**
      * Tạo UploadedFile .xlsx in-memory theo template export.
      *
-     * @param list<array{zone_code: string, status: string, pct: int}> $dataRows
+     * @param list<array{zone_code: string, status: string, pct: int, assignee?: string, deadline?: string, notes?: string}> $dataRows
      */
     private function makeXlsx(array $dataRows): UploadedFile
     {
@@ -235,7 +260,10 @@ class ExcelImportTest extends TestCase
                 '',
                 $d['status'],
                 $d['pct'],
-                '', '', '', '',
+                $d['assignee'] ?? '',
+                $d['deadline'] ?? '',
+                '',
+                $d['notes'] ?? '',
             ], null, 'A'.$row);
             $row++;
         }

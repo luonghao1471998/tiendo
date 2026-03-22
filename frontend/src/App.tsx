@@ -11,6 +11,7 @@ import Notifications from '@/pages/Notifications'
 import ProjectDetail from '@/pages/ProjectDetail'
 import ProjectList from '@/pages/ProjectList'
 import ShareView from '@/pages/ShareView'
+import { DocumentTitleSync } from '@/lib/documentTitle'
 import useAuthStore from '@/stores/authStore'
 
 function App() {
@@ -20,8 +21,9 @@ function App() {
     void initSession()
   }, [initSession])
 
-  // Share routes are public — render immediately without waiting for auth loading
-  const isShareRoute = window.location.pathname.startsWith('/share/')
+  // Share routes are public — render immediately without waiting for auth loading.
+  // Không dùng startsWith('/share/') vì SPA có thể nằm sau base path (vd: /app/share/...).
+  const isShareRoute = /\/share\/[^/?#]+/.test(window.location.pathname)
 
   if (loading && !isShareRoute) {
     return <div className="p-6 text-sm text-muted-foreground">Đang khởi tạo phiên làm việc...</div>
@@ -29,6 +31,7 @@ function App() {
 
   return (
     <BrowserRouter>
+      <DocumentTitleSync />
       <Routes>
         <Route element={<GuestOnly token={token} />}>
           <Route path="/login" element={<Login />} />

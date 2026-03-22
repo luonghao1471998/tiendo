@@ -179,6 +179,8 @@ const useCanvasStore = create<CanvasState & CanvasActions>((set, get) => ({
       lastSyncAt: new Date().toISOString(),
       selectedZoneId: null,
       selectedMarkId: null,
+      // Tránh filter cũ (từ canvas khác / phiên trước) làm ẩn hết zone sau import Excel hoặc vào layer
+      filterStatus: null,
     })
 
     void marksResp
@@ -243,9 +245,12 @@ const useCanvasStore = create<CanvasState & CanvasActions>((set, get) => ({
       selectedZoneId: state.selectedZoneId === id ? null : state.selectedZoneId,
     })),
 
-  addMark: (mark) => set((state) => ({ marks: [...state.marks, mark] })),
+  addMark: (mark) =>
+    set((state) => ({ marks: [...state.marks, normalizeMark(mark)] })),
   updateMark: (mark) =>
-    set((state) => ({ marks: state.marks.map((m) => (m.id === mark.id ? mark : m)) })),
+    set((state) => ({
+      marks: state.marks.map((m) => (m.id === mark.id ? normalizeMark(mark) : m)),
+    })),
   removeMark: (id) =>
     set((state) => ({
       marks: state.marks.filter((m) => m.id !== id),
