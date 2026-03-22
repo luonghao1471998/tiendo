@@ -1,7 +1,7 @@
 # PROJECT-STATUS.md — TienDo
 > File này dùng để upload lên Claude AI Web / Project để AI giữ context xuyên phiên.
 > Cập nhật sau mỗi session. Source of truth: SPEC.md + CLAUDE.md.
-> **Ngày cập nhật:** 2026-03-22
+> **Ngày cập nhật:** 2026-03-23
 
 ---
 
@@ -9,7 +9,8 @@
 
 | Ngày | Nội dung |
 |------|-----------|
-| **2026-03-22** | **Docs:** `SESSION-LOG.md` — gộp / chuẩn hoá `## Current Session` theo template; thêm session meta **2026-03-22** (quy trình ghi log). |
+| **2026-03-23** | **UX — tiêu đề tab:** `document.title` theo route (tiếng Việt ngắn, dạng **`Hành động · TienDo`**). **`frontend/src/lib/documentTitle.ts`:** `APP_TAB_NAME`, `titleForPathname()`, `DocumentTitleSync`; **`App.tsx`:** mount `<DocumentTitleSync />` trong `BrowserRouter`; **`index.html`:** default **TienDo** (thay «frontend»). Không dùng react-helmet. Sprint: `ux: document-title-per-route`. |
+| **2026-03-22** | **Docs:** `SESSION-LOG.md` — chuẩn hoá / ghi `## Current Session` theo template; session meta (quy trình log). Sau commit có thể **clear** `## Current Session` (chỉ giữ comment + Sprint History). |
 | **2026-03-20** | **CommentsTab (TEST 7.3 / 7.4):** URL ảnh comment = `commentImageBasename` + encode; không set `Content-Type` multipart thủ công; chặn &gt; 5 ảnh với thông báo rõ. **PROJECT-STATUS** § Gotchas đã đồng bộ (phiên 2026-03-20). |
 | **2026-03 (QA E2E)** | **CanvasProgress / field_team:** popup tiến độ chỉ **`PATCH /api/v1/zones/{id}/status`** (`status` + `completion_pct`); backend **`transitionInPlace`** (cùng `status`) + **`in_progress` + 100%** → tự chuyển **`completed`**. **`canvasStore`:** `addMark`/`updateMark` bọc **`normalizeMark`**; **`fetchZonesAndMarks`** reset **`filterStatus: null`**. **`parseApiError`:** `FORBIDDEN` / 401 → tiếng Việt. **Share:** `FRONTEND_URL` + redirect `web.php`; **ShareView / CanvasView:** marks theo **`zone_id`** khi lọc chip. **Excel:** preview `new_*`; cột 5 → **assignee**. |
 
@@ -203,6 +204,7 @@ HEALTH
 - **ShareView / CanvasView**: chip lọc theo trạng thái zone — **vùng tô (marks)** chỉ hiện khi thuộc zone đang được lọc (cùng `zone_id`), tránh chồng mark cam/xanh lên zone trạng thái khác
 - **`ProjectList` CreateProjectModal**: validation message từ API qua `parseApiError`
 - **`ZoneCreateModal`**: overlay + card brand (TEST 5.7)
+- **Tiêu đề tab trình duyệt**: `DocumentTitleSync` + `titleForPathname(pathname)` — mỗi route một title ngắn (Đăng nhập, Dự án, Chi tiết dự án, Soạn bản vẽ, Tiến độ, Xem bản vẽ, Thông báo, Người dùng, Xem chia sẻ); route không khớp → **TienDo**
 
 #### Brand Design — Ánh Dương (#FF7F29):
 
@@ -347,7 +349,7 @@ viewer         → read-only + export
 ### Cấu trúc thư mục:
 ```
 frontend/src/
-├── App.tsx                    ← BrowserRouter + Routes; `/share/:token` render khi `loading` (tránh block ShareView)
+├── App.tsx                    ← BrowserRouter + `<DocumentTitleSync />` + Routes; share route không chặn bởi `authStore.loading`
 ├── api/
 │   └── client.ts              ← Axios instance + Bearer interceptor + setAuthToken/getAuthToken
 ├── stores/
@@ -357,6 +359,7 @@ frontend/src/
 │   ├── geometry.ts            ← toPercent/fromPercent helpers
 │   ├── constants.ts           ← ZONE_STATUS_COLOR, MARK_STATUS_COLOR
 │   ├── parseApiError.ts       ← VALIDATION_ERROR + details; INVALID_STATE_TRANSITION → tiếng Việt
+│   ├── documentTitle.ts      ← `titleForPathname`, `DocumentTitleSync` → `document.title` theo route
 │   └── utils.ts               ← cn()
 ├── pages/
 │   ├── Login.tsx
@@ -401,7 +404,8 @@ frontend/src/
 - **SettingsTab**: `clipboard.writeText()` cho copy share link, `window.location.origin` để build full URL
 - **Primary color**: CSS var `--primary: 24 100% 58%` = `hsl(24, 100%, 58%)` ≈ #FF7F29 Ánh Dương orange; `--primary-foreground: white`
 - **Login + global loading**: `authStore.login()` không set `loading: true` — nếu set, `App.tsx` unmount trang Login trong lúc request → `setError` sau khi fail có thể không hiển thị; Login.tsx dùng local `loading` riêng
-- **`App.tsx`**: `pathname.startsWith('/share/')` → bỏ qua màn hình "Đang khởi tạo phiên làm việc..." để ShareView mount ngay (tab ẩn danh)
+- **`App.tsx`**: regex `\/share\/[^/?#]+` trên `pathname` → bỏ qua màn hình "Đang khởi tạo phiên làm việc..." để ShareView mount ngay (tab ẩn danh; hỗ trợ base path)
+- **Tiêu đề tab (`document.title`)**: thêm/sửa route trong React → cập nhật **`titleForPathname()`** (`lib/documentTitle.ts`). Vite **`base`** khác `/` thì có thể cần strip prefix trước khi regex
 
 ---
 
