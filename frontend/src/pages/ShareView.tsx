@@ -9,6 +9,7 @@ import { fabric } from 'fabric'
 import { useParams } from 'react-router-dom'
 
 import { ZONE_STATUS, ZONE_STATUS_COLOR, MARK_STATUS_COLOR } from '@/lib/constants'
+import { resolveZoneAssigneeDisplay } from '@/lib/zoneAssigneeDisplay'
 import type { Zone, Mark, Geometry } from '@/stores/canvasStore'
 
 // ─── Types phản ánh đúng response API ────────────────────────────────────────
@@ -204,6 +205,7 @@ function hexWithAlpha(hex: string, alpha: number): string {
 
 function ShareZoneInfoPopup({ zone, onClose }: { zone: Zone; onClose: () => void }) {
   const color = ZONE_STATUS_COLOR[zone.status] ?? '#9CA3AF'
+  const assigneeLine = resolveZoneAssigneeDisplay(zone, [])
   return (
     <div className="w-60 rounded-xl border bg-white shadow-xl">
       <div className="flex items-center justify-between rounded-t-xl bg-gray-50 px-4 py-2">
@@ -228,12 +230,12 @@ function ShareZoneInfoPopup({ zone, onClose }: { zone: Zone; onClose: () => void
           <span className="text-gray-500">Tiến độ</span>
           <span className="font-bold">{zone.completion_pct}%</span>
         </div>
-        {zone.assignee ? (
-          <div className="flex items-center justify-between">
-            <span className="text-gray-500">Giao cho</span>
-            <span>{zone.assignee}</span>
-          </div>
-        ) : null}
+        <div className="flex items-center justify-between">
+          <span className="text-gray-500">Giao cho</span>
+          <span className={assigneeLine ? '' : 'text-gray-400'}>
+            {assigneeLine || 'Chưa giao'}
+          </span>
+        </div>
         {zone.deadline ? (
           <div className="flex items-center justify-between">
             <span className="text-gray-500">Deadline</span>

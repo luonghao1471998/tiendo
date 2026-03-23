@@ -53,6 +53,7 @@ class ProjectMemberService
                     'password' => Hash::make($temporaryPassword),
                     'role' => 'viewer',
                     'is_active' => true,
+                    'must_change_password' => true,
                 ]);
             }
 

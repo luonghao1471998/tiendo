@@ -31,7 +31,8 @@ export default function Login() {
     setLoading(true)
     try {
       await login(email.trim(), password)
-      navigate('/projects', { replace: true })
+      const { user: u } = useAuthStore.getState()
+      navigate(u?.must_change_password ? '/account/must-change-password' : '/projects', { replace: true })
     } catch (err) {
       setError(parseLoginError(err))
     } finally {

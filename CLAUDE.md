@@ -25,7 +25,7 @@
 - Tọa độ: % (0.0–1.0) — độc lập zoom/resolution
 
 **External**
-- Python 3.x + pdf2image + Pillow + poppler-utils: xử lý PDF → tiles
+- Python 3.x + pdf2image + Pillow + poppler-utils + ezdxf + matplotlib: PDF/DXF/DWG → tiles
 - PhpSpreadsheet: export/import Excel
 - Local disk storage: `storage/app/` — KHÔNG dùng S3 trong MVP
 
@@ -192,11 +192,13 @@ tiendo/
 │   └── web.php                # Redirect → React SPA
 │
 ├── scripts/
-│   └── pdf_processor.py       # Python: PDF page 1 → PNG → tiles 1024×1024
+│   ├── drawing_processor.py   # Python: PDF/DXF/DWG → raster → tiles 1024×1024
+│   ├── pdf_processor.py       # (legacy) chỉ PDF — ưu tiên drawing_processor.py
+│   └── requirements-drawing.txt
 │
 ├── storage/app/
 │   ├── layers/{layer_id}/
-│   │   ├── original.pdf
+│   │   ├── original.pdf | original.dxf | original.dwg
 │   │   └── tiles/0_{x}_{y}.jpg
 │   └── comments/{comment_id}/{uuid}.{ext}
 │
@@ -355,12 +357,19 @@ failed → processing    (retry, guard: retry_count < 3)
 
 ## External Integrations
 
-### Python PDF Processor
+### Python Drawing Processor (PDF / DXF / DWG)
 
 ```
-Script: scripts/pdf_processor.py
+Script: scripts/drawing_processor.py
 Chạy qua: ProcessPdfJob → PdfProcessingService::processToTiles()
-Input: --input {pdf_path} --output-dir {tiles_dir} --tile-size 1024 --dpi 150
+Input: --input {file_path} --output-dir {tiles_dir} --tile-size 1024 --dpi 150
+  • PDF: pdf2image (trang 1)
+  • DXF: ezdxf + matplotlib (modelspace → raster)
+  • DWG nhị phân: thử ezdxf.readfile; nếu thất bại → ezdxf.addons.odafc (ODA File Converter
+    chuyển tạm DWG→DXF). Cài ODA từ Open Design Alliance; Linux đặt `ODAFileConverter` trong PATH
+    hoặc `TIENDO_ODA_FILE_CONVERTER` = đường dẫn tuyệt đối tới executable/AppImage.
+    ODA (bản thường gặp) hỗ trợ tới khoảng R2018 — DWG rất mới có thể cần xuất DXF/PDF trong AutoCAD.
+    Headless Linux: có thể cần `xvfb` nếu ODA mở GUI.
 
 Output stdout (JSON):
   Success: {"success": true, "width_px": N, "height_px": N, "tiles_generated": N}
@@ -370,7 +379,7 @@ Exit code: 0=success, 1=handled error (JSON stdout), 2+=crash (parse stderr)
 
 Dependencies cần cài trên server:
   sudo apt-get install -y poppler-utils
-  pip3 install pdf2image Pillow
+  pip3 install -r scripts/requirements-drawing.txt
 
 Tile naming: {z}_{x}_{y}.jpg (MVP: z=0 only)
 Ví dụ 4096×2048 → 8 tiles: 0_0_0.jpg, 0_1_0.jpg, ..., 0_3_1.jpg
@@ -381,6 +390,7 @@ Ví dụ 4096×2048 → 8 tiles: 0_0_0.jpg, 0_1_0.jpg, ..., 0_3_1.jpg
 PYTHON_BIN=/usr/bin/python3
 PDF_TILE_SIZE=1024
 PDF_DPI=150
+TIENDO_ODA_FILE_CONVERTER=   # optional: path to ODAFileConverter (when not in PATH)
 ```
 
 ### PhpSpreadsheet (Export/Import Excel)
@@ -579,7 +589,7 @@ action=restored     → KHÔNG cho rollback (tránh infinite loop)
 1. Laravel scaffold + PostgreSQL + migrations toàn bộ schema
 2. Auth: Sanctum login/logout/me + RBAC middleware
 3. CRUD User + Project + MasterLayer + Layer
-4. Upload PDF → ProcessPdfJob → Python pdf2image → tiles
+4. Upload PDF/DXF/DWG → ProcessPdfJob → Python drawing_processor → tiles
 5. Serve tiles: `GET /layers/{id}/tiles/{z}/{x}/{y}.jpg`
 6. React: Login, ProjectList, ProjectDetail (tabs: Mặt bằng, Thành viên)
 7. CanvasWrapper + TileLayer + PolygonLayer (render zones)

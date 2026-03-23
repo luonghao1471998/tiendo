@@ -11,7 +11,7 @@ use Illuminate\Database\Eloquent\Collection;
 
 class ProjectRepository
 {
-    public function paginateForUser(User $user, int $perPage = 20): LengthAwarePaginator
+    public function paginateForUser(User $user, int $perPage = 20, ?string $nameSearch = null): LengthAwarePaginator
     {
         $query = Project::query()->orderByDesc('id');
 
@@ -19,6 +19,14 @@ class ProjectRepository
             $query->whereHas('members', function ($q) use ($user) {
                 $q->where('user_id', $user->id);
             });
+        }
+
+        if ($nameSearch !== null && $nameSearch !== '') {
+            $term = trim($nameSearch);
+            if ($term !== '') {
+                $like = '%'.addcslashes($term, '%_\\').'%';
+                $query->where('name', 'ilike', $like);
+            }
         }
 
         return $query->paginate($perPage);

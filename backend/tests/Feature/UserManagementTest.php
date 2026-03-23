@@ -29,6 +29,25 @@ class UserManagementTest extends TestCase
         $this->assertGreaterThanOrEqual(4, count($response->json('data')));
     }
 
+    public function test_admin_can_filter_users_by_name_search(): void
+    {
+        $admin = User::factory()->create([
+            'role' => 'admin',
+            'is_active' => true,
+        ]);
+        User::factory()->create(['name' => 'Alice Nguyen']);
+        User::factory()->create(['name' => 'Bob Tran']);
+
+        Sanctum::actingAs($admin);
+        $response = $this->getJson('/api/v1/users?search=Alice&per_page=100');
+
+        $response->assertOk()
+            ->assertJsonPath('success', true);
+        $data = $response->json('data');
+        $this->assertCount(1, $data);
+        $this->assertSame('Alice Nguyen', $data[0]['name']);
+    }
+
     public function test_non_admin_cannot_list_users(): void
     {
         $pm = User::factory()->create([
@@ -73,5 +92,49 @@ class UserManagementTest extends TestCase
             'email' => 'new@example.com',
             'is_active' => false,
         ]);
+    }
+
+    public function test_admin_can_create_user(): void
+    {
+        $admin = User::factory()->create([
+            'role' => 'admin',
+            'is_active' => true,
+        ]);
+
+        Sanctum::actingAs($admin);
+        $response = $this->postJson('/api/v1/users', [
+            'name' => 'New User',
+            'email' => 'newuser@example.com',
+            'password' => 'secret-pass-1',
+            'role' => 'field_team',
+            'is_active' => true,
+        ]);
+
+        $response->assertCreated()
+            ->assertJsonPath('success', true)
+            ->assertJsonPath('data.email', 'newuser@example.com')
+            ->assertJsonPath('data.role', 'field_team');
+
+        $this->assertDatabaseHas('users', [
+            'email' => 'newuser@example.com',
+            'role' => 'field_team',
+            'must_change_password' => true,
+        ]);
+    }
+
+    public function test_non_admin_cannot_create_user(): void
+    {
+        $pm = User::factory()->create([
+            'role' => 'project_manager',
+            'is_active' => true,
+        ]);
+
+        Sanctum::actingAs($pm);
+        $this->postJson('/api/v1/users', [
+            'name' => 'X',
+            'email' => 'x@example.com',
+            'password' => 'password12',
+            'role' => 'viewer',
+        ])->assertStatus(403);
     }
 }

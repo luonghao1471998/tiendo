@@ -1,17 +1,28 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Link, useParams } from 'react-router-dom'
-import { CheckCircle2, ChevronLeft } from 'lucide-react'
+import { CheckCircle2, ChevronLeft, FileDown } from 'lucide-react'
 
 import client from '@/api/client'
 import CanvasToolbar from '@/components/canvas/CanvasToolbar'
 import type { CanvasDrawMode } from '@/components/canvas/CanvasToolbar'
 import CanvasWrapper from '@/components/canvas/CanvasWrapper'
-import PolygonLayer from '@/components/canvas/PolygonLayer'
+import ExportMarqueeOverlay from '@/components/canvas/ExportMarqueeOverlay'
+import PolygonLayer, { type FabricCanvasHandle } from '@/components/canvas/PolygonLayer'
 import TileLayer from '@/components/canvas/TileLayer'
 import ZoomControls from '@/components/canvas/ZoomControls'
 import { ZONE_STATUS, ZONE_STATUS_COLOR } from '@/lib/constants'
+import { exportLayerPdf, type PdfCropRect } from '@/lib/canvasPdfExport'
 import { parseApiError } from '@/lib/parseApiError'
+import {
+  activityAvatarColor,
+  activityScopeTag,
+  activityUserInitials,
+  describeActivityLog,
+  formatRelativeTimeVi,
+  type ActivityLogEntry,
+} from '@/lib/activityLogDisplay'
+import { resolveZoneAssigneeDisplay } from '@/lib/zoneAssigneeDisplay'
 import type { Zone, Geometry } from '@/stores/canvasStore'
 import useCanvasStore from '@/stores/canvasStore'
 import useAuthStore from '@/stores/authStore'
@@ -27,6 +38,21 @@ type LayerInfo = {
 }
 
 type ApiResponse<T> = { success: boolean; data: T }
+
+/** geometry_pct gửi API: luôn polygon với points {x,y} 0–1 */
+function geometryToApiPolygon(geo: Geometry): { type: 'polygon'; points: { x: number; y: number }[] } {
+  let rawPoints: [number, number][]
+  if (geo.type === 'rect') {
+    const x = geo.x ?? 0
+    const y = geo.y ?? 0
+    const w = geo.width ?? 0
+    const h = geo.height ?? 0
+    rawPoints = [[x, y], [x + w, y], [x + w, y + h], [x, y + h]]
+  } else {
+    rawPoints = (geo.points ?? []) as [number, number][]
+  }
+  return { type: 'polygon', points: rawPoints.map(([px, py]) => ({ x: px, y: py })) }
+}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -47,7 +73,6 @@ function ZoneCreateModal({
 }: {
   onSave: (data: {
     name: string
-    assignee: string
     deadline: string
     tasks: string
     notes: string
@@ -56,7 +81,6 @@ function ZoneCreateModal({
   loading: boolean
 }) {
   const [name, setName] = useState('')
-  const [assignee, setAssignee] = useState('')
   const [deadline, setDeadline] = useState('')
   const [tasks, setTasks] = useState('')
   const [notes, setNotes] = useState('')
@@ -66,7 +90,7 @@ function ZoneCreateModal({
     if (!name.trim()) { setErr('Tên khu vực là bắt buộc.'); return }
     setErr(null)
     try {
-      await onSave({ name: name.trim(), assignee, deadline, tasks, notes })
+      await onSave({ name: name.trim(), deadline, tasks, notes })
     } catch (e) {
       setErr(parseApiError(e, 'Tạo khu vực thất bại.'))
     }
@@ -94,7 +118,7 @@ function ZoneCreateModal({
               Thông tin khu vực mới
             </h2>
             <p className="mt-0.5 text-xs text-[#64748B]">
-              Nhập tên khu vực và thông tin bổ sung (nếu có).
+              Nhập tên và thông tin bổ sung. Giao cho thành viên dự án thì chỉnh ở panel Chi tiết sau khi tạo.
             </p>
           </div>
         </div>
@@ -110,15 +134,6 @@ function ZoneCreateModal({
               value={name}
               onChange={(e) => setName(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') void submit() }}
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-[#0F172A]">Người phụ trách</label>
-            <input
-              className={fieldCls}
-              placeholder="Tên đội/người (tuỳ chọn)"
-              value={assignee}
-              onChange={(e) => setAssignee(e.target.value)}
             />
           </div>
           <div>
@@ -186,17 +201,9 @@ type Comment = {
   created_at: string
 }
 
-// ─── History types ────────────────────────────────────────────────────────────
+// ─── History types (API ActivityLogResource) ─────────────────────────────────
 
-type HistoryEntry = {
-  id: number
-  action: 'created' | 'updated' | 'status_changed' | 'deleted' | 'restored'
-  user_name: string
-  changes: Record<string, { from: unknown; to: unknown }> | null
-  snapshot_before: Record<string, unknown> | null
-  restored_from_log_id: number | null
-  created_at: string
-}
+type HistoryEntry = ActivityLogEntry
 
 // ─── CommentsTab ─────────────────────────────────────────────────────────────
 
@@ -372,15 +379,7 @@ function CommentsTab({ zone, isPM }: { zone: Zone; isPM: boolean }) {
   )
 }
 
-// ─── HistoryTab ───────────────────────────────────────────────────────────────
-
-const ACTION_LABELS: Record<HistoryEntry['action'], string> = {
-  created: 'Tạo mới',
-  updated: 'Cập nhật',
-  status_changed: 'Đổi trạng thái',
-  deleted: 'Xóa',
-  restored: 'Khôi phục',
-}
+// ─── HistoryTab — timeline kiểu dashboard (chi tiết từ changes) ──────────────
 
 function HistoryTab({ zone, isPM, layerId }: { zone: Zone; isPM: boolean; layerId: number }) {
   const { updateZone, fetchZonesAndMarks } = useCanvasStore()
@@ -408,9 +407,7 @@ function HistoryTab({ zone, isPM, layerId }: { zone: Zone; isPM: boolean; layerI
         data: ApiResponse<Zone>
       }
       updateZone(resp.data.data)
-      // Refresh full canvas so all zone colors update
       void fetchZonesAndMarks(layerId)
-      // Reload history list
       const h = (await client.get(`/zones/${zone.id}/history`)) as {
         data: ApiResponse<HistoryEntry[]>
       }
@@ -423,46 +420,134 @@ function HistoryTab({ zone, isPM, layerId }: { zone: Zone; isPM: boolean; layerI
   }
 
   if (loading) {
-    return <p className="p-3 text-center text-xs text-muted-foreground">Đang tải...</p>
+    return (
+      <div className="space-y-3 p-3">
+        <div className="h-24 animate-pulse rounded-xl bg-muted/60" />
+        <div className="h-24 animate-pulse rounded-xl bg-muted/60" />
+      </div>
+    )
   }
 
   return (
     <div className="p-3">
-      {err ? <p className="mb-2 text-xs text-red-600">{err}</p> : null}
+      {err ? (
+        <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+          {err}
+        </div>
+      ) : null}
+
+      <p className="mb-3 text-[11px] leading-relaxed text-muted-foreground">
+        Lịch sử khu <span className="font-medium text-foreground">«{zone.name}»</span> — gồm thao tác trên
+        vùng và các mark tiến độ trong vùng. Thời gian hiển thị dạng tương đối.
+      </p>
+
       {entries.length === 0 ? (
-        <p className="text-center text-xs text-muted-foreground py-4">Chưa có lịch sử.</p>
+        <div className="rounded-xl border border-dashed border-muted-foreground/25 bg-muted/20 py-10 text-center">
+          <p className="text-sm font-medium text-muted-foreground">Chưa có hoạt động</p>
+          <p className="mt-1 text-xs text-muted-foreground/80">
+            Khi có thay đổi trạng thái, tiến độ hoặc mark, lịch sử sẽ hiện tại đây.
+          </p>
+        </div>
       ) : (
-        <ul className="space-y-2 max-h-72 overflow-y-auto">
+        <ul className="max-h-[min(420px,52vh)] space-y-3 overflow-y-auto pr-0.5">
           {entries.map((e) => {
             const canRb = canRollback && e.action !== 'restored' && !e.restored_from_log_id
+            const desc = describeActivityLog(e, zone.name)
+            const tag = activityScopeTag(desc.scope)
+            const avatarBg = activityAvatarColor(e.user_name)
+            const initials = activityUserInitials(e.user_name)
+
             return (
-              <li key={e.id} className="border-l-2 border-muted pl-3 text-xs">
-                <div className="flex items-start justify-between gap-1">
-                  <div className="flex-1 min-w-0">
-                    <span className="font-medium">{ACTION_LABELS[e.action]}</span>
-                    <span className="mx-1 text-muted-foreground">·</span>
-                    <span className="text-muted-foreground">{e.user_name}</span>
-                    {e.action === 'status_changed' && e.changes?.status ? (
-                      <p className="text-[10px] text-muted-foreground mt-0.5">
-                        {String(e.changes.status.from)} → {String(e.changes.status.to)}
-                      </p>
-                    ) : null}
+              <li
+                key={e.id}
+                className="rounded-xl border border-[#E2E8F0] bg-white p-3 shadow-sm transition hover:shadow-md"
+              >
+                <div className="flex gap-3">
+                  <div
+                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white shadow-inner"
+                    style={{ backgroundColor: avatarBg }}
+                    aria-hidden
+                  >
+                    {initials}
                   </div>
-                  <div className="flex shrink-0 flex-col items-end gap-1">
-                    <span className="text-[10px] text-muted-foreground whitespace-nowrap">
-                      {new Date(e.created_at).toLocaleDateString('vi-VN', {
-                        day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
-                      })}
-                    </span>
-                    {canRb ? (
-                      <button
-                        type="button"
-                        disabled={rollingBack === e.id}
-                        onClick={() => void rollback(e.id)}
-                        className="rounded border px-1.5 py-0.5 text-[10px] text-blue-600 hover:bg-blue-50 disabled:opacity-60"
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-start justify-between gap-x-2 gap-y-1">
+                      <p className="min-w-0 text-sm leading-snug text-[#0F172A]">
+                        <span className="font-semibold">{e.user_name}</span>{' '}
+                        <span className="text-[#334155]">{desc.summary}</span>
+                      </p>
+                      <time
+                        className="shrink-0 text-[11px] text-[#94A3B8]"
+                        dateTime={e.created_at}
+                        title={new Date(e.created_at).toLocaleString('vi-VN')}
                       >
-                        {rollingBack === e.id ? '...' : 'Khôi phục'}
-                      </button>
+                        {formatRelativeTimeVi(e.created_at)}
+                      </time>
+                    </div>
+
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <span
+                        className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ring-1 ring-inset ${tag.className}`}
+                      >
+                        {tag.label}
+                      </span>
+                      <span className="text-[10px] text-[#94A3B8]">
+                        #{e.id}
+                        {e.target_id != null ? ` · ref ${e.target_id}` : ''}
+                      </span>
+                    </div>
+
+                    {desc.lines.length > 0 ? (
+                      <div className="mt-2.5 space-y-1.5 border-t border-[#F1F5F9] pt-2.5">
+                        {desc.lines.map((line) => (
+                          <div key={line.id} className="text-xs leading-relaxed">
+                            {line.kind === 'status_arrow' || line.kind === 'pct_arrow' ? (
+                              <span className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+                                <span
+                                  className={
+                                    line.accent === 'amber'
+                                      ? 'font-medium text-amber-800'
+                                      : line.accent === 'emerald'
+                                        ? 'font-medium text-emerald-800'
+                                        : 'text-[#475569]'
+                                  }
+                                >
+                                  {line.left}
+                                </span>
+                                {line.arrow ? (
+                                  <span className="font-medium text-[#94A3B8]">{line.arrow}</span>
+                                ) : null}
+                                {line.right != null ? (
+                                  <span
+                                    className={
+                                      line.kind === 'pct_arrow'
+                                        ? 'font-semibold text-[#059669]'
+                                        : 'font-semibold text-[#B45309]'
+                                    }
+                                  >
+                                    {line.right}
+                                  </span>
+                                ) : null}
+                              </span>
+                            ) : (
+                              <span className="text-[#475569]">{line.left}</span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+
+                    {canRb ? (
+                      <div className="mt-2.5 flex justify-end border-t border-[#F1F5F9] pt-2">
+                        <button
+                          type="button"
+                          disabled={rollingBack === e.id}
+                          onClick={() => void rollback(e.id)}
+                          className="rounded-lg border border-[#BFDBFE] bg-[#EFF6FF] px-2.5 py-1 text-[11px] font-medium text-[#1D4ED8] transition hover:bg-[#DBEAFE] disabled:opacity-60"
+                        >
+                          {rollingBack === e.id ? 'Đang hoàn tác…' : 'Hoàn tác (rollback)'}
+                        </button>
+                      </div>
                     ) : null}
                   </div>
                 </div>
@@ -550,6 +635,8 @@ function ZoneDetailPanel({
 
   const isPM = user?.role === 'admin' ||
     user?.projects.some((p) => p.role === 'project_manager') === true
+
+  const assigneeDisplay = resolveZoneAssigneeDisplay(zone, members)
 
   const save = async () => {
     setSaving(true); setErr(null)
@@ -694,10 +781,12 @@ function ZoneDetailPanel({
               className="w-full accent-[#FF7F29]" />
           </div>
 
-          {/* Assignee dropdown — chỉ PM/admin mới đổi được */}
+          {/* Giao cho: SPEC PATCH-07 — chỉ thành viên dự án (FK); nhãn assignee + hiển thị */}
           {isPM ? (
             <div>
-              <label className="mb-1.5 block text-xs font-medium text-[#64748B]">Giao cho</label>
+              <label className="mb-1.5 block text-xs font-medium text-[#64748B]">
+                Giao cho (thành viên dự án)
+              </label>
               <select
                 className={fieldCls}
                 value={assignedUserId ?? ''}
@@ -711,15 +800,18 @@ function ZoneDetailPanel({
                   </option>
                 ))}
               </select>
-            </div>
-          ) : zone.assigned_user_id != null ? (
-            <div>
-              <p className="mb-0.5 text-xs font-medium text-[#64748B]">Giao cho</p>
-              <p className="text-sm text-[#0F172A]">
-                {members.find((m) => m.user.id === zone.assigned_user_id)?.user.name ?? `#${zone.assigned_user_id}`}
+              <p className="mt-1 text-[11px] leading-snug text-[#94A3B8]">
+                Chọn người trong dự án để gán quyền theo zone. Sau khi lưu, tên hiển thị cập nhật theo SPEC.
               </p>
             </div>
-          ) : null}
+          ) : (
+            <div>
+              <p className="mb-0.5 text-xs font-medium text-[#64748B]">Giao cho</p>
+              <p className={`text-sm ${assigneeDisplay ? 'text-[#0F172A]' : 'text-[#94A3B8]'}`}>
+                {assigneeDisplay || 'Chưa giao'}
+              </p>
+            </div>
+          )}
 
           <div>
             <label className="mb-1.5 block text-xs font-medium text-[#64748B]">Deadline</label>
@@ -763,13 +855,19 @@ function ZoneDetailPanel({
 
 export default function CanvasEditor() {
   const { id: projectId, layerId } = useParams<{ id: string; layerId: string }>()
-  const { user } = useAuthStore()
+  const { user, hasProjectRole } = useAuthStore()
+  const polygonFabricRef = useRef<FabricCanvasHandle>(null)
+  const [pdfMarquee, setPdfMarquee] = useState(false)
+  const [pdfBusy, setPdfBusy] = useState(false)
+  const [pdfMapEl, setPdfMapEl] = useState<HTMLElement | null>(null)
+  const [pdfMarqueeKey, setPdfMarqueeKey] = useState(0)
 
   const [layer, setLayer] = useState<LayerInfo | null>(null)
   const [layerError, setLayerError] = useState<string | null>(null)
 
   // Draw mode toolbar
   const [drawMode, setDrawMode] = useState<CanvasDrawMode>('select')
+  const [vertexEditZoneId, setVertexEditZoneId] = useState<number | null>(null)
 
   // Pending geometry after drawing, waiting for zone name input
   const [pendingGeometry, setPendingGeometry] = useState<Geometry | null>(null)
@@ -779,7 +877,8 @@ export default function CanvasEditor() {
   const selectedZoneId = useCanvasStore((s) => s.selectedZoneId)
   const filterStatus = useCanvasStore((s) => s.filterStatus)
   const lastSyncAt = useCanvasStore((s) => s.lastSyncAt)
-  const { fetchZonesAndMarks, syncSince, addZone, selectZone, setFilterStatus, reset } = useCanvasStore()
+  const { fetchZonesAndMarks, syncSince, addZone, selectZone, setFilterStatus, reset, updateZone } =
+    useCanvasStore()
 
   const layerIdNum = Number(layerId)
   const projectIdNum = Number(projectId)
@@ -812,40 +911,47 @@ export default function CanvasEditor() {
   // Reset draw mode when layer changes
   useEffect(() => { setDrawMode('select') }, [layerIdNum])
 
+  useEffect(() => {
+    if (drawMode !== 'select') setVertexEditZoneId(null)
+  }, [drawMode])
+
   // Handle zone draw completion → show modal
   const handleDrawComplete = (geometry: Geometry) => {
     setPendingGeometry(geometry)
     setDrawMode('select') // switch back to select while modal is open
   }
 
-  // Convert frontend Geometry to API payload format:
-  // - rect → polygon (4 points)
-  // - points: [x,y] → {x, y}
-  const toApiGeometry = (geo: Geometry): { type: 'polygon'; points: { x: number; y: number }[] } => {
-    let rawPoints: [number, number][]
-    if (geo.type === 'rect') {
-      const x = geo.x ?? 0
-      const y = geo.y ?? 0
-      const w = geo.width ?? 0
-      const h = geo.height ?? 0
-      rawPoints = [[x, y], [x + w, y], [x + w, y + h], [x, y + h]]
-    } else {
-      rawPoints = (geo.points ?? []) as [number, number][]
-    }
-    return { type: 'polygon', points: rawPoints.map(([px, py]) => ({ x: px, y: py })) }
-  }
+  const handleZoneGeometryCommit = useCallback(
+    async (zoneId: number, geometry: Geometry) => {
+      const z = useCanvasStore.getState().zones.find((zz) => zz.id === zoneId)
+      if (!z) return
+      try {
+        const resp = (await client.put(`/zones/${zoneId}`, {
+          name: z.name,
+          completion_pct: z.completion_pct,
+          notes: z.notes,
+          deadline: z.deadline,
+          assigned_user_id: z.assigned_user_id,
+          geometry_pct: geometryToApiPolygon(geometry),
+        })) as { data: ApiResponse<Zone> }
+        updateZone(resp.data.data)
+      } catch (e) {
+        alert(parseApiError(e, 'Không lưu được hình vùng.'))
+      }
+    },
+    [updateZone],
+  )
 
   // Create zone via API
   const handleZoneCreate = async (formData: {
-    name: string; assignee: string; deadline: string; tasks: string; notes: string
+    name: string; deadline: string; tasks: string; notes: string
   }) => {
     if (!pendingGeometry) return
     setCreatingZone(true)
     try {
       const resp = (await client.post(`/layers/${layerIdNum}/zones`, {
         name: formData.name,
-        geometry_pct: toApiGeometry(pendingGeometry),
-        assignee: formData.assignee || null,
+        geometry_pct: geometryToApiPolygon(pendingGeometry),
         deadline: formData.deadline || null,
         tasks: formData.tasks || null,
         notes: formData.notes || null,
@@ -865,6 +971,36 @@ export default function CanvasEditor() {
   const layerReady = layer?.status === 'ready'
   const widthPx = layer?.width_px ?? 2480
   const heightPx = layer?.height_px ?? 3508
+
+  const canExportPdf = hasProjectRole(projectIdNum, ['project_manager', 'admin'])
+  const canEditZoneGeometry = hasProjectRole(projectIdNum, ['project_manager', 'admin'])
+
+  useLayoutEffect(() => {
+    if (!pdfMarquee) {
+      setPdfMapEl(null)
+      return
+    }
+    const fc = polygonFabricRef.current?.getFabric()
+    const el = (fc as unknown as { lowerCanvasEl?: HTMLElement })?.lowerCanvasEl ?? null
+    setPdfMapEl(el)
+  }, [pdfMarquee, layerReady, widthPx, heightPx])
+
+  const runLayerPdf = async (crop?: PdfCropRect) => {
+    const fc = polygonFabricRef.current?.getFabric() ?? null
+    setPdfBusy(true)
+    try {
+      const name =
+        crop != null
+          ? `layer_${layerIdNum}_vung_chon.pdf`
+          : `layer_${layerIdNum}_toan_bo.pdf`
+      await exportLayerPdf(layerIdNum, widthPx, heightPx, fc, name, crop)
+    } catch (err) {
+      alert(parseApiError(err, 'Xuất PDF thất bại.'))
+    } finally {
+      setPdfBusy(false)
+      setPdfMarquee(false)
+    }
+  }
 
   if (layerError) {
     return (
@@ -905,7 +1041,33 @@ export default function CanvasEditor() {
               {layer.status === 'processing' ? 'Đang xử lý...' : layer.status}
             </span>
           ) : null}
-          <div className="ml-auto flex items-center gap-2 shrink-0">
+          <div className="ml-auto flex flex-wrap items-center justify-end gap-2 shrink-0">
+            {canExportPdf && layerReady ? (
+              <>
+                <button
+                  type="button"
+                  disabled={pdfBusy || pdfMarquee}
+                  onClick={() => void runLayerPdf()}
+                  className="inline-flex cursor-pointer items-center gap-1 rounded-lg border border-[#FF7F29]/50 bg-[#FFF3E8] px-2.5 py-1 text-xs font-medium text-[#C2410C] transition hover:bg-[#FFEDD5] disabled:opacity-50"
+                >
+                  <FileDown className="h-3.5 w-3.5" />
+                  {pdfBusy && !pdfMarquee ? 'PDF…' : 'PDF toàn bộ'}
+                </button>
+                <button
+                  type="button"
+                  disabled={pdfBusy}
+                  onClick={() => {
+                    setDrawMode('select')
+                    setPdfMarqueeKey((k) => k + 1)
+                    setPdfMarquee(true)
+                  }}
+                  className="inline-flex cursor-pointer items-center gap-1 rounded-lg border border-[#E2E8F0] bg-white px-2.5 py-1 text-xs font-medium text-[#64748B] transition hover:bg-[#F8FAFC] disabled:opacity-50"
+                >
+                  <FileDown className="h-3.5 w-3.5" />
+                  PDF vùng chọn
+                </button>
+              </>
+            ) : null}
             <span className="hidden text-xs text-[#94A3B8] sm:inline">
               {zones.length} khu vực
             </span>
@@ -927,6 +1089,7 @@ export default function CanvasEditor() {
               <CanvasWrapper widthPx={widthPx} heightPx={heightPx}>
                 <TileLayer layerId={layerIdNum} widthPx={widthPx} heightPx={heightPx} />
                 <PolygonLayer
+                  ref={polygonFabricRef}
                   widthPx={widthPx}
                   heightPx={heightPx}
                   canvasMode="editor"
@@ -934,6 +1097,10 @@ export default function CanvasEditor() {
                   drawMode={drawMode !== 'select'}
                   drawShape={drawMode === 'draw_rect' ? 'rect' : 'polygon'}
                   onDrawComplete={handleDrawComplete}
+                  enableZoneDrag={canEditZoneGeometry}
+                  vertexEditZoneId={vertexEditZoneId}
+                  onVertexEditZoneChange={setVertexEditZoneId}
+                  onZoneGeometryCommit={handleZoneGeometryCommit}
                 />
               </CanvasWrapper>
             ) : (
@@ -946,10 +1113,59 @@ export default function CanvasEditor() {
               </div>
             )}
 
+            {pdfMarquee && layerReady ? (
+              <ExportMarqueeOverlay
+                key={pdfMarqueeKey}
+                active={pdfMarquee}
+                widthPx={widthPx}
+                heightPx={heightPx}
+                mapTargetEl={pdfMapEl}
+                onCancel={() => setPdfMarquee(false)}
+                onComplete={(crop) => void runLayerPdf(crop)}
+              />
+            ) : null}
+
             {/* Draw toolbar — desktop only */}
             <div className="absolute left-4 top-4 z-10 hidden lg:block">
               <CanvasToolbar mode={drawMode} onModeChange={setDrawMode} />
             </div>
+
+            {layerReady && vertexEditZoneId != null && canEditZoneGeometry ? (
+              <div
+                role="toolbar"
+                aria-label="Sửa hình vùng"
+                className="absolute left-1/2 top-16 z-20 flex max-w-[min(100vw-2rem,28rem)] -translate-x-1/2 flex-col gap-2 rounded-xl border border-[#E2E8F0] bg-white/95 px-4 py-2.5 shadow-lg backdrop-blur-sm"
+              >
+                <div className="flex flex-wrap items-center justify-center gap-2">
+                  <span className="text-xs font-semibold text-[#0F172A]">Sửa đỉnh vùng</span>
+                  <button
+                    type="button"
+                    onClick={() => polygonFabricRef.current?.commitVertexEdit?.()}
+                    className="cursor-pointer rounded-lg bg-[#FF7F29] px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-[#E5691D]"
+                  >
+                    Lưu hình
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => polygonFabricRef.current?.cancelVertexEdit?.()}
+                    className="cursor-pointer rounded-lg border border-[#E2E8F0] px-3 py-1.5 text-xs font-medium text-[#64748B] transition hover:bg-[#F8FAFC]"
+                  >
+                    Hủy
+                  </button>
+                </div>
+                <p className="text-center text-[10px] leading-snug text-[#64748B]">
+                  Đỉnh đỏ kéo • <strong className="font-semibold text-[#475569]">Chấm xanh: double-click</strong> để
+                  chèn đỉnh trên cạnh (click một lần / click ngoài polygon không chèn đỉnh) • Chuột phải đỉnh đỏ: xóa
+                  • Ctrl+Z / Ctrl+Shift+Z • Lưu hình / Hủy / Esc
+                </p>
+              </div>
+            ) : null}
+
+            {layerReady && drawMode === 'select' && canEditZoneGeometry && vertexEditZoneId == null ? (
+              <div className="absolute left-1/2 top-4 z-10 hidden max-w-md -translate-x-1/2 rounded-lg border border-[#E2E8F0] bg-white/90 px-3 py-1.5 text-center text-[10px] text-[#64748B] shadow-sm backdrop-blur-sm lg:block pointer-events-none">
+                Double-click vùng: sửa đỉnh • Kéo vùng: di chuyển toàn bộ (lưu sau khi thả)
+              </div>
+            ) : null}
 
             {/* Hint when in draw mode */}
             {drawMode !== 'select' ? (

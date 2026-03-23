@@ -35,7 +35,17 @@ class ProjectController extends Controller
 
         $this->authorize('viewAny', Project::class);
 
-        $projects = $this->projectService->listForUser($user);
+        $perPage = (int) $request->integer('per_page', 20);
+        $perPage = max(1, min($perPage, 100));
+
+        $search = $request->query('search');
+        $nameSearch = null;
+        if (is_string($search)) {
+            $t = trim($search);
+            $nameSearch = $t !== '' ? mb_substr($t, 0, 100) : null;
+        }
+
+        $projects = $this->projectService->listForUser($user, $perPage, $nameSearch);
 
         return response()->json([
             'success' => true,

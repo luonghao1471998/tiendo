@@ -1,0 +1,14 @@
+# Python dependencies for backend/scripts/drawing_processor.py
+# Install: pip install -r scripts/requirements-drawing.txt
+# System: poppler-utils required for pdf2image (PDF)
+#
+# DWG nhị phân: pip KHÔNG đủ — cần ODA File Converter (Open Design Alliance):
+#   https://www.opendesign.com/guestfiles/oda_file_converter
+# Linux: cài DEB/RPM hoặc AppImage; đảm bảo `ODAFileConverter` trong PATH, hoặc set
+#   TIENDO_ODA_FILE_CONVERTER=/absolute/path/to/ODAFileConverter (hoặc AppImage).
+# Server headless Linux: có thể cần xvfb nếu ODA bật GUI.
+
+pdf2image>=1.17.0
+Pillow>=10.0.0
+ezdxf>=1.3.0
+matplotlib>=3.8.0

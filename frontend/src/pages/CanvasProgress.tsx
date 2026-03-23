@@ -1,11 +1,14 @@
-import { useEffect, useRef, useState } from 'react'
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import { fabric } from 'fabric'
+import { FileDown } from 'lucide-react'
 import { Link, useParams } from 'react-router-dom'
 
 import client from '@/api/client'
+import type { FabricCanvasHandle } from '@/components/canvas/PolygonLayer'
 import CanvasWrapper from '@/components/canvas/CanvasWrapper'
 import TileLayer from '@/components/canvas/TileLayer'
 import ZoomControls from '@/components/canvas/ZoomControls'
+import { exportLayerPdf } from '@/lib/canvasPdfExport'
 import { ZONE_STATUS, ZONE_STATUS_COLOR, MARK_STATUS_COLOR } from '@/lib/constants'
 import { parseApiError } from '@/lib/parseApiError'
 import type { Zone, Mark, Geometry } from '@/stores/canvasStore'
@@ -24,6 +27,16 @@ type LayerInfo = {
 }
 
 type ApiResponse<T> = { success: boolean; data: T }
+
+function isFieldTeamOnProject(
+  user: { role: string | null; projects: { id: number; role: string }[] } | null,
+  projectId: number,
+): boolean {
+  if (!user) return false
+  if (user.role === 'admin') return false
+  const m = user.projects.find((p) => String(p.id) === String(projectId))
+  return m?.role === 'field_team'
+}
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
@@ -373,18 +386,25 @@ interface MarkDrawCanvasProps {
   onMarkClick: (mark: Mark, x: number, y: number) => void
 }
 
-function MarkDrawCanvas({
-  widthPx,
-  heightPx,
-  currentUserId,
-  isDrawingMark,
-  markStatusDraw,
-  onMarkDrawn,
-  onZoneClick,
-  onMarkClick,
-}: MarkDrawCanvasProps) {
+const MarkDrawCanvas = forwardRef<FabricCanvasHandle, MarkDrawCanvasProps>(function MarkDrawCanvas(
+  {
+    widthPx,
+    heightPx,
+    currentUserId,
+    isDrawingMark,
+    markStatusDraw,
+    onMarkDrawn,
+    onZoneClick,
+    onMarkClick,
+  },
+  ref,
+) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const fabricRef = useRef<fabric.Canvas | null>(null)
+
+  useImperativeHandle(ref, () => ({
+    getFabric: () => fabricRef.current,
+  }))
   const drawPoints = useRef<{ x: number; y: number }[]>([])
   const previewLineRef = useRef<fabric.Polyline | null>(null)
   const previewPolyRef = useRef<fabric.Polygon | null>(null)
@@ -571,7 +591,7 @@ function MarkDrawCanvas({
       style={{ position: 'absolute', inset: 0 }}
     />
   )
-}
+})
 
 // ─── pointInPolygon util ────────────────────────────────────────────────────
 
@@ -595,6 +615,8 @@ function pointInPolygon(x: number, y: number, polygon: fabric.Point[]): boolean 
 export default function CanvasProgress() {
   const { id: projectId, layerId } = useParams<{ id: string; layerId: string }>()
   const { user } = useAuthStore()
+  const fabricRef = useRef<FabricCanvasHandle>(null)
+  const [pdfBusy, setPdfBusy] = useState(false)
 
   const [layer, setLayer] = useState<LayerInfo | null>(null)
   const [layerError, setLayerError] = useState<string | null>(null)
@@ -664,10 +686,29 @@ export default function CanvasProgress() {
 
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const ownZones = zones.filter((z) => z.assigned_user_id === currentUserId)
+  const showFieldTeamPdf = isFieldTeamOnProject(user, projectIdNum)
 
   const layerReady = layer?.status === 'ready'
   const widthPx = layer?.width_px ?? 2480
   const heightPx = layer?.height_px ?? 3508
+
+  const handleExportAssignedPdf = async () => {
+    const fc = fabricRef.current?.getFabric() ?? null
+    setPdfBusy(true)
+    try {
+      await exportLayerPdf(
+        layerIdNum,
+        widthPx,
+        heightPx,
+        fc,
+        `layer_${layerIdNum}_vung_duoc_giao.pdf`,
+      )
+    } catch (err) {
+      alert(parseApiError(err, 'Xuất PDF thất bại.'))
+    } finally {
+      setPdfBusy(false)
+    }
+  }
 
   if (layerError) {
     return (
@@ -693,6 +734,18 @@ export default function CanvasProgress() {
           Tiến độ
         </span>
         <div className="ml-auto flex items-center gap-2 shrink-0">
+          {showFieldTeamPdf && layerReady ? (
+            <button
+              type="button"
+              disabled={pdfBusy}
+              onClick={() => void handleExportAssignedPdf()}
+              className="hidden sm:inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-[#FF7F29]/40 bg-[#FFF3E8] px-2.5 py-1 text-xs font-medium text-[#C2410C] hover:bg-[#FFEDD5] disabled:opacity-50"
+              title="Xuất PDF: vùng được giao rõ, khu vực khác mờ"
+            >
+              <FileDown className="h-3.5 w-3.5 shrink-0" />
+              {pdfBusy ? 'Đang xuất PDF…' : 'PDF vùng giao'}
+            </button>
+          ) : null}
           <span className="hidden text-xs text-muted-foreground sm:inline">
             {ownZones.length} khu vực
           </span>
@@ -714,6 +767,7 @@ export default function CanvasProgress() {
             <CanvasWrapper widthPx={widthPx} heightPx={heightPx}>
               <TileLayer layerId={layerIdNum} widthPx={widthPx} heightPx={heightPx} />
               <MarkDrawCanvas
+                ref={fabricRef}
                 widthPx={widthPx}
                 heightPx={heightPx}
                 currentUserId={currentUserId}

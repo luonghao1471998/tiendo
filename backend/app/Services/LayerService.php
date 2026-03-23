@@ -9,6 +9,7 @@ use App\Models\Layer;
 use App\Models\MasterLayer;
 use App\Models\User;
 use App\Repositories\LayerRepository;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -16,9 +17,7 @@ use Illuminate\Validation\ValidationException;
 
 class LayerService
 {
-    public function __construct(private readonly LayerRepository $layerRepository)
-    {
-    }
+    public function __construct(private readonly LayerRepository $layerRepository) {}
 
     public function upload(MasterLayer $masterLayer, User $user, array $data, UploadedFile $file): Layer
     {
@@ -30,9 +29,16 @@ class LayerService
             ]);
         }
 
+        $ext = strtolower($file->getClientOriginalExtension());
+        if (! in_array($ext, ['pdf', 'dxf', 'dwg'], true)) {
+            throw ValidationException::withMessages([
+                'file' => ['Chỉ chấp nhận file PDF, DXF hoặc DWG.'],
+            ]);
+        }
+
         $disk = Storage::disk('local');
 
-        $layer = DB::transaction(function () use ($masterLayer, $user, $data, $file, $code, $disk) {
+        $layer = DB::transaction(function () use ($masterLayer, $user, $data, $file, $code, $disk, $ext) {
             $layer = $this->layerRepository->create([
                 'master_layer_id' => $masterLayer->id,
                 'name' => $data['name'],
@@ -47,7 +53,7 @@ class LayerService
                 'uploaded_by' => $user->id,
             ]);
 
-            $relative = 'layers/'.$layer->id.'/original.pdf';
+            $relative = 'layers/'.$layer->id.'/original.'.$ext;
             $disk->put($relative, file_get_contents($file->getRealPath()) ?: '');
 
             $this->layerRepository->update($layer, [
@@ -65,7 +71,7 @@ class LayerService
     }
 
     /**
-     * @return \Illuminate\Database\Eloquent\Collection<int, Layer>
+     * @return Collection<int, Layer>
      */
     public function listForMasterLayer(MasterLayer $masterLayer)
     {

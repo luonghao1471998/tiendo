@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Building2, FolderOpen, MapPin, Plus, X } from 'lucide-react'
+import { Building2, FolderOpen, MapPin, Plus, Search, X } from 'lucide-react'
 
 import client from '@/api/client'
 import { parseApiError } from '@/lib/parseApiError'
+import { useDebouncedValue } from '@/lib/useDebouncedValue'
 import useAuthStore from '@/stores/authStore'
 
 type ProjectItem = {
@@ -155,11 +156,18 @@ export default function ProjectList() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [showCreate, setShowCreate] = useState(false)
+  const [nameSearch, setNameSearch] = useState('')
+  const debouncedNameSearch = useDebouncedValue(nameSearch, 300)
 
   const fetchProjects = async () => {
     try {
       setLoading(true)
-      const response = (await client.get('/projects')) as { data: ApiListResponse<ProjectItem> }
+      const params: Record<string, string | number> = { per_page: 100 }
+      const q = debouncedNameSearch.trim()
+      if (q) params.search = q
+      const response = (await client.get('/projects', { params })) as {
+        data: ApiListResponse<ProjectItem>
+      }
       setProjects(response.data.data)
     } catch {
       setError('Không tải được danh sách dự án.')
@@ -168,7 +176,10 @@ export default function ProjectList() {
     }
   }
 
-  useEffect(() => { void fetchProjects() }, [])
+  useEffect(() => {
+    void fetchProjects()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refetch khi bộ lọc tên (debounced) đổi
+  }, [debouncedNameSearch])
 
   return (
     <main className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6">
@@ -197,10 +208,37 @@ export default function ProjectList() {
         <div className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
       ) : null}
 
+      {!loading && !error && (projects.length > 0 || nameSearch.trim() !== '') ? (
+        <div className="relative mb-6 max-w-md">
+          <Search
+            className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#94A3B8]"
+            aria-hidden
+          />
+          <input
+            type="search"
+            className={`${inputCls} pl-9`}
+            placeholder="Tìm dự án theo tên..."
+            value={nameSearch}
+            onChange={(e) => setNameSearch(e.target.value)}
+            aria-label="Tìm dự án theo tên"
+          />
+        </div>
+      ) : null}
+
       {/* Grid */}
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {loading ? (
           [1, 2, 3].map((i) => <ProjectCardSkeleton key={i} />)
+        ) : projects.length === 0 && nameSearch.trim() !== '' ? (
+          <div className="col-span-full flex flex-col items-center justify-center rounded-2xl border border-[#E2E8F0] bg-[#F8FAFC] py-16 text-center">
+            <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-white shadow-sm">
+              <Search size={22} className="text-[#FF7F29]" />
+            </div>
+            <p className="font-semibold text-[#0F172A]">Không tìm thấy dự án</p>
+            <p className="mt-1 text-sm text-[#64748B]">
+              Không có tên nào khớp «{nameSearch.trim()}». Thử từ khóa khác.
+            </p>
+          </div>
         ) : projects.length === 0 ? (
           <div className="col-span-full flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-[#E2E8F0] py-20 text-center">
             <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-[#FFF3E8]">
@@ -258,7 +296,8 @@ export default function ProjectList() {
         <CreateProjectModal
           onClose={() => setShowCreate(false)}
           onCreated={(newProject) => {
-            setProjects((prev) => [newProject, ...prev])
+            setNameSearch('')
+            setProjects((prev) => [newProject, ...prev.filter((p) => p.id !== newProject.id)])
             setShowCreate(false)
           }}
         />

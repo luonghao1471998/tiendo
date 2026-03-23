@@ -72,6 +72,71 @@ class ZoneCrudStateMachineTest extends TestCase
             ->assertJsonPath('error.code', 'NOT_FOUND');
     }
 
+    public function test_put_zone_preserves_assignee_when_field_omitted(): void
+    {
+        [$user, $layer] = $this->createProjectManagerContext();
+        Sanctum::actingAs($user);
+
+        $create = $this->postJson('/api/v1/layers/'.$layer->id.'/zones', [
+            'name' => 'Z keep assignee',
+            'assignee' => 'Nhãn từ API',
+            'geometry_pct' => [
+                'type' => 'polygon',
+                'points' => [
+                    ['x' => 0.1, 'y' => 0.1],
+                    ['x' => 0.3, 'y' => 0.1],
+                    ['x' => 0.3, 'y' => 0.3],
+                ],
+            ],
+        ])->assertStatus(201);
+
+        $zoneId = (int) $create->json('data.id');
+
+        $this->putJson('/api/v1/zones/'.$zoneId, [
+            'name' => 'Z keep assignee',
+            'completion_pct' => 10,
+        ])->assertOk()
+            ->assertJsonPath('data.assignee', 'Nhãn từ API');
+    }
+
+    public function test_put_assigned_user_id_auto_fills_assignee_when_empty(): void
+    {
+        [$pm, $layer] = $this->createProjectManagerContext();
+        $field = User::factory()->create([
+            'role' => 'field_team',
+            'is_active' => true,
+            'name' => 'Thợ X',
+        ]);
+        ProjectMember::query()->create([
+            'project_id' => $layer->masterLayer->project_id,
+            'user_id' => $field->id,
+            'role' => 'field_team',
+            'created_at' => now(),
+        ]);
+        Sanctum::actingAs($pm);
+
+        $create = $this->postJson('/api/v1/layers/'.$layer->id.'/zones', [
+            'name' => 'Z auto label',
+            'geometry_pct' => [
+                'type' => 'polygon',
+                'points' => [
+                    ['x' => 0.1, 'y' => 0.1],
+                    ['x' => 0.3, 'y' => 0.1],
+                    ['x' => 0.3, 'y' => 0.3],
+                ],
+            ],
+        ])->assertStatus(201);
+
+        $zoneId = (int) $create->json('data.id');
+
+        $this->putJson('/api/v1/zones/'.$zoneId, [
+            'name' => 'Z auto label',
+            'assigned_user_id' => $field->id,
+        ])->assertOk()
+            ->assertJsonPath('data.assigned_user_id', $field->id)
+            ->assertJsonPath('data.assignee', 'Thợ X');
+    }
+
     public function test_invalid_transition_returns_standard_error_format(): void
     {
         [$user, $layer] = $this->createProjectManagerContext();

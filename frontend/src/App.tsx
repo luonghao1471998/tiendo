@@ -7,6 +7,7 @@ import CanvasEditor from '@/pages/CanvasEditor'
 import CanvasProgress from '@/pages/CanvasProgress'
 import CanvasView from '@/pages/CanvasView'
 import Login from '@/pages/Login'
+import MustChangePasswordPage from '@/pages/MustChangePasswordPage'
 import Notifications from '@/pages/Notifications'
 import ProjectDetail from '@/pages/ProjectDetail'
 import ProjectList from '@/pages/ProjectList'
@@ -14,7 +15,7 @@ import ShareView from '@/pages/ShareView'
 import { DocumentTitleSync } from '@/lib/documentTitle'
 import useAuthStore from '@/stores/authStore'
 
-function App() {
+export function App() {
   const { token, loading, initSession } = useAuthStore()
 
   useEffect(() => {
@@ -38,15 +39,18 @@ function App() {
         </Route>
 
         <Route element={<RequireAuth token={token} />}>
-          <Route element={<AppShell />}>
-            <Route path="/" element={<Navigate to="/projects" replace />} />
-            <Route path="/projects" element={<ProjectList />} />
-            <Route path="/projects/:id" element={<ProjectDetail />} />
-            <Route path="/projects/:id/layers/:layerId/editor" element={<CanvasEditor />} />
-            <Route path="/projects/:id/layers/:layerId/progress" element={<CanvasProgress />} />
-            <Route path="/projects/:id/layers/:layerId/view" element={<CanvasView />} />
-            <Route path="/notifications" element={<Notifications />} />
-            <Route path="/admin/users" element={<AdminUsers />} />
+          <Route path="/account/must-change-password" element={<MustChangePasswordPage />} />
+          <Route element={<BlockUntilPasswordChanged />}>
+            <Route element={<AppShell />}>
+              <Route path="/" element={<Navigate to="/projects" replace />} />
+              <Route path="/projects" element={<ProjectList />} />
+              <Route path="/projects/:id" element={<ProjectDetail />} />
+              <Route path="/projects/:id/layers/:layerId/editor" element={<CanvasEditor />} />
+              <Route path="/projects/:id/layers/:layerId/progress" element={<CanvasProgress />} />
+              <Route path="/projects/:id/layers/:layerId/view" element={<CanvasView />} />
+              <Route path="/notifications" element={<Notifications />} />
+              <Route path="/admin/users" element={<AdminUsers />} />
+            </Route>
           </Route>
         </Route>
 
@@ -65,8 +69,20 @@ function RequireAuth({ token }: { token: string | null }) {
 }
 
 function GuestOnly({ token }: { token: string | null }) {
+  const { user } = useAuthStore()
+  if (token && user?.must_change_password) {
+    return <Navigate to="/account/must-change-password" replace />
+  }
   if (token) {
     return <Navigate to="/projects" replace />
+  }
+  return <Outlet />
+}
+
+function BlockUntilPasswordChanged() {
+  const { user } = useAuthStore()
+  if (user?.must_change_password) {
+    return <Navigate to="/account/must-change-password" replace />
   }
   return <Outlet />
 }

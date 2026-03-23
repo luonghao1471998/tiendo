@@ -12,7 +12,7 @@ return new class extends Migration
             $table->id();
             $table->foreignId('zone_id')->constrained()->cascadeOnDelete();
             $table->foreignId('user_id')->constrained('users');
-            $table->text('content');
+            $table->text('content')->nullable();
             $table->jsonb('images')->default('[]'); // ["comments/1/img1.jpg", ...]
             $table->timestampsTz();
         });

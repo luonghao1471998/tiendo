@@ -9,6 +9,7 @@ use App\Models\User;
 use App\Models\Zone;
 use App\Repositories\LayerRepository;
 use App\Repositories\ZoneRepository;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -18,11 +19,10 @@ class ZoneService
     public function __construct(
         private readonly ZoneRepository $zoneRepository,
         private readonly LayerRepository $layerRepository
-    ) {
-    }
+    ) {}
 
     /**
-     * @return \Illuminate\Database\Eloquent\Collection<int, Zone>
+     * @return Collection<int, Zone>
      */
     public function listByLayerId(int $layerId)
     {
@@ -35,7 +35,7 @@ class ZoneService
     {
         $layer = $this->layerRepository->findById($layerId);
         if ($layer === null) {
-            throw (new ModelNotFoundException())->setModel(Layer::class, [$layerId]);
+            throw (new ModelNotFoundException)->setModel(Layer::class, [$layerId]);
         }
 
         return $layer;
@@ -45,7 +45,7 @@ class ZoneService
     {
         $zone = $this->zoneRepository->findById($zoneId);
         if ($zone === null) {
-            throw (new ModelNotFoundException())->setModel(Zone::class, [$zoneId]);
+            throw (new ModelNotFoundException)->setModel(Zone::class, [$zoneId]);
         }
 
         return $zone;
@@ -98,13 +98,32 @@ class ZoneService
         $snapshotBefore = $zone->toArray();
         $payload = [
             'name' => $data['name'],
-            'name_full' => $data['name_full'] ?? null,
-            'assignee' => $data['assignee'] ?? null,
-            'assigned_user_id' => $data['assigned_user_id'] ?? null,
-            'deadline' => $data['deadline'] ?? null,
-            'tasks' => $data['tasks'] ?? null,
-            'notes' => $data['notes'] ?? null,
         ];
+
+        foreach (['name_full', 'assignee', 'deadline', 'tasks', 'notes'] as $key) {
+            if (array_key_exists($key, $data)) {
+                $payload[$key] = $data[$key];
+            }
+        }
+
+        if (array_key_exists('assigned_user_id', $data)) {
+            $newId = $data['assigned_user_id'];
+            $payload['assigned_user_id'] = $newId;
+
+            // SPEC PATCH-07: khi đổi assigned_user_id mà client không gửi assignee → auto nhãn = tên user
+            // nếu đang trống hoặc nhãn trùng tên user được giao trước đó.
+            if (! array_key_exists('assignee', $data) && $newId !== null) {
+                $newUser = User::query()->find((int) $newId);
+                if ($newUser instanceof User) {
+                    $cur = trim((string) ($zone->assignee ?? ''));
+                    $oldId = $zone->assigned_user_id;
+                    $oldName = $oldId ? trim((string) (User::query()->find((int) $oldId)?->name ?? '')) : '';
+                    if ($cur === '' || ($oldName !== '' && $cur === $oldName)) {
+                        $payload['assignee'] = $newUser->name;
+                    }
+                }
+            }
+        }
 
         if (array_key_exists('geometry_pct', $data)) {
             $payload['geometry_pct'] = $data['geometry_pct'];
@@ -353,7 +372,7 @@ class ZoneService
     }
 
     /**
-     * @param array<string, mixed> $geometry
+     * @param  array<string, mixed>  $geometry
      */
     private function computeAreaPx(array $geometry, ?int $widthPx, ?int $heightPx): ?float
     {
@@ -381,8 +400,8 @@ class ZoneService
     }
 
     /**
-     * @param array<string, mixed>|null $snapshotBefore
-     * @param array<string, mixed>|null $changes
+     * @param  array<string, mixed>|null  $snapshotBefore
+     * @param  array<string, mixed>|null  $changes
      */
     private function logActivity(
         string $targetType,
@@ -406,8 +425,8 @@ class ZoneService
     }
 
     /**
-     * @param array<string, mixed> $before
-     * @param array<string, mixed> $after
+     * @param  array<string, mixed>  $before
+     * @param  array<string, mixed>  $after
      * @return array<string, mixed>
      */
     private function buildChanges(array $before, array $after): array

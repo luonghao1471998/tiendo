@@ -17,9 +17,9 @@ class ProjectService
     {
     }
 
-    public function listForUser(User $user, int $perPage = 20): LengthAwarePaginator
+    public function listForUser(User $user, int $perPage = 20, ?string $nameSearch = null): LengthAwarePaginator
     {
-        return $this->projectRepository->paginateForUser($user, $perPage);
+        return $this->projectRepository->paginateForUser($user, $perPage, $nameSearch);
     }
 
     public function create(User $actor, array $data): Project

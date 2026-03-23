@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Http\UploadedFile;
 
 class StoreLayerRequest extends FormRequest
 {
@@ -25,7 +26,30 @@ class StoreLayerRequest extends FormRequest
             'code' => ['required', 'string', 'max:50'],
             'type' => ['required', 'string', 'in:architecture,electrical,mechanical,plumbing,other'],
             'sort_order' => ['nullable', 'integer', 'min:0'],
-            'file' => ['required', 'file', 'mimes:pdf', 'max:'.$maxKb],
+            'file' => [
+                'required',
+                'file',
+                'max:'.$maxKb,
+                function (string $attribute, mixed $value, \Closure $fail): void {
+                    if (! $value instanceof UploadedFile) {
+                        return;
+                    }
+                    $ext = strtolower($value->getClientOriginalExtension());
+                    if (! in_array($ext, ['pdf', 'dxf', 'dwg'], true)) {
+                        $fail('Chỉ chấp nhận file PDF, DXF hoặc DWG.');
+                    }
+                },
+            ],
+        ];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public function messages(): array
+    {
+        return [
+            'file.max' => 'File vượt quá dung lượng cho phép.',
         ];
     }
 }

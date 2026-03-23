@@ -2,6 +2,326 @@
 
 ## Current Session
 
+### Session: 2026-03-23 — Activity log: `updated_at` hiển thị gọn
+
+**Task**
+
+- Trường `updated_at` trong `changes` (from→to ISO dài) không còn in hai mốc; hiển thị một dòng: **`Cập nhật: YYYY-MM-DD HH:mm:ss`** (giờ local), lấy mốc **`to`**.
+
+**Files:** `frontend/src/lib/activityLogDisplay.ts` (`fmtDateTimeCompact`, nhánh `updated_at` trong `pushChangeLines`)
+
+**Verify:** `npm run lint && npm run build` — 0 error
+
+---
+
+### Session: 2026-03-23 (bổ sung) — Tab Lịch sử (zone): UI timeline + log chi tiết
+
+**Task**
+
+- Tham chiếu mockup dashboard (Hoạt động / Thành viên): học layout **card**, **avatar chữ cái**, **thời gian tương đối**, **tag phạm vi** (khu vực vs mark), **highlight** trạng thái / %.
+- **`activityLogDisplay.ts`:** `describeActivityLog` — câu tóm tắt theo `target_type` + `action`; parse `changes` (status, `completion_pct`, deadline, assignee, geometry, note…); `formatRelativeTimeVi`, `activityUserInitials`, `activityAvatarColor`.
+- **`HistoryTab` (`CanvasEditor`):** thẻ trắng viền nhạt, shadow; skeleton loading; empty state; dòng chi tiết có mũi tên cho trạng thái & tiến độ; nút rollback kiểu secondary xanh.
+- **Gap so với mockup (chưa làm / backlog):** feed **Hoạt động cấp dự án** (filter mặt bằng / hành động / người), **KPI 24h** trên cùng feed, **thumbnail comment** trong luồng activity, **storage meter** sidebar, **FAB** — hiện MVP chỉ có **lịch sử theo zone** trong panel canvas.
+
+**Files:** `frontend/src/lib/activityLogDisplay.ts`, `frontend/src/pages/CanvasEditor.tsx` (HistoryTab)
+
+**Verify:** `npm run lint && npm run build` — 0 error
+
+---
+
+### Session: 2026-03-22 — WF-3: bỏ “Người phụ trách” tự do ở popup tạo zone; Giao cho đúng SPEC
+
+**Task**
+
+- **SPEC (PATCH-07):** `assigned_user_id` = nguồn sự thật (thành viên dự án); `assignee` = nhãn hiển thị. Popup cũ cho nhập tên tự do → lưu `assignee` nhưng panel “Giao cho” chỉ đọc FK → hiển thị “Chưa giao” — mâu thuẫn.
+- **Frontend:** Bỏ ô “Người phụ trách” khỏi `ZoneCreateModal`; không gửi `assignee` lúc POST tạo zone. Gợi ý: giao việc ở panel Chi tiết (dropdown thành viên). `resolveZoneAssigneeDisplay` — ưu tiên `assignee`, sau đó tên từ `assigned_user_id` + danh sách members. `CanvasView` / `ShareView` popup đồng bộ nhãn “Giao cho”.
+- **Backend:** `ZoneService::update` chỉ cập nhật các field có trong payload (`array_key_exists`) để PUT từ client không xóa `assignee`/`tasks`/… Khi đổi `assigned_user_id` mà không gửi `assignee` → auto `assignee = user.name` nếu nhãn đang trống hoặc trùng tên user được giao trước (PATCH-07).
+- **SPEC.md:** WF-3 + bổ sung dòng trong PATCH-07 (popup không nhập tên tự do).
+- **Tests:** `ZoneCrudStateMachineTest` — giữ `assignee` khi PUT bỏ qua field; auto nhãn khi gán `assigned_user_id`.
+
+**Files:** `frontend/src/lib/zoneAssigneeDisplay.ts`, `CanvasEditor.tsx`, `CanvasView.tsx`, `ShareView.tsx`, `backend/app/Services/ZoneService.php`, `SPEC.md`, `ZoneCrudStateMachineTest.php`
+
+**Verify:** `npm run lint && npm run build`; `php artisan test --filter=ZoneCrudStateMachineTest`
+
+---
+
+### Session: 2026-03-17 — Upload bản vẽ: PDF, DXF, DWG
+
+**Task**
+
+- SPEC/CLAUDE: cho phép upload bản vẽ **PDF**, **DXF**, **DWG** (AutoCAD); pipeline tiles giữ nguyên (ProcessPdfJob → Python).
+- **Backend:** `StoreLayerRequest` + `LayerService` — validate đuôi + lưu `layers/{id}/original.{pdf|dxf|dwg}`; `PdfProcessingService` gọi `scripts/drawing_processor.py`.
+- **Python:** `drawing_processor.py` — PDF qua pdf2image; DXF/DWG qua ezdxf + matplotlib (modelspace); DWG lỗi đọc → thông báo gợi ý xuất DXF/PDF. Dependencies: `scripts/requirements-drawing.txt` (+ poppler cho PDF).
+- **Frontend:** `ProjectDetail.tsx` — `accept` + kiểm tra đuôi (vì DWG thường `application/octet-stream`).
+- **Docs:** `SPEC.md` (AC-03, WF-2), `CLAUDE.md` (script + deps).
+- **Tests:** `LayerUploadFormatsTest` (422 định dạng lạ; DXF/PDF 201 + dispatch job).
+- **Migration:** `make_zone_comments_content_nullable` chạy trước `create_zone_comments` → thêm `Schema::hasTable`; `create_zone_comments` dùng `content` nullable cho migrate sạch.
+
+**Files**
+
+| File | Thay đổi |
+|------|-----------|
+| `backend/scripts/drawing_processor.py` | Mới |
+| `backend/scripts/requirements-drawing.txt` | Mới |
+| `backend/app/Http/Requests/StoreLayerRequest.php` | pdf/dxf/dwg |
+| `backend/app/Services/LayerService.php` | `original.{ext}` |
+| `backend/app/Services/PdfProcessingService.php` | `drawing_processor.py` |
+| `frontend/src/pages/ProjectDetail.tsx` | UI + validation đuôi |
+| `backend/tests/Feature/LayerUploadFormatsTest.php` | Mới |
+| `SPEC.md`, `CLAUDE.md` | Đồng bộ |
+| `2026_03_17_000001_make_zone_comments_content_nullable.php` | `hasTable` guard |
+| `2026_03_19_032342_create_zone_comments_table.php` | `content` nullable |
+
+**Verify**
+
+- `cd backend && ./vendor/bin/pint --test` (hoặc pint) + `php artisan test --filter=LayerUploadFormatsTest`
+- `cd frontend && npm run lint && npm run build` — 0 error
+
+---
+
+### Session: 2026-03-21 (bổ sung 2) — WF-3: click nền khi sửa đỉnh không “vô hiệu”
+
+- **Hành vi:** Double-click chấm xanh chèn đỉnh; click ra ngoài polygon **không** chèn đỉnh mới (đúng thiết kế). Trước đây click nền gọi `selectZone(null)` → mất chọn vùng trên sidebar dù vẫn đang sửa đỉnh → dễ hiểu nhầm “không có gì xảy ra”.
+- **Sửa:** Khi `vertexEditZoneId != null`, click nền gọi `selectZone(vertexEditZoneId)` để giữ panel đúng vùng. Gợi ý trên thanh **Sửa đỉnh vùng** nêu rõ chỉ **double-click** chấm xanh mới chèn đỉnh.
+
+**Files:** `PolygonLayer.tsx`, `CanvasEditor.tsx`
+
+---
+
+### Session: 2026-03-21 (bổ sung) — WF-3: không mất vùng khi dblclick midpoint rồi click nền
+
+**Task**
+
+- **Lỗi:** Trong chế độ sửa đỉnh, double-click midpoint (xanh) chèn đỉnh rồi click ra ngoài canvas → `selectZone(null)` → effect vẽ lại zones gọi `fc.clear()` → xóa luôn object overlay (`vertex-edit`) trong khi `vertexEditZoneId` vẫn còn; effect overlay không chạy lại → vùng đang sửa **không được vẽ lại** (trông như “mất cả vùng”).
+- **Sửa:** Khi `vertexEditZoneId != null`, làm sạch layer bằng cách **chỉ remove object không gắn** `ZONE_VERTEX_EDIT_TAG`; sau khi vẽ zone/mark khác, **`bringToFront`** mọi object overlay. Export `ZONE_VERTEX_EDIT_TAG` từ `zoneVertexOverlay.ts`.
+
+**Files:** `frontend/src/components/canvas/PolygonLayer.tsx`, `frontend/src/components/canvas/zoneVertexOverlay.ts`
+
+**Verify:** `npm run lint && npm run build` — 0 error.
+
+---
+
+### Session: 2026-03-21 — Admin tạo user (1 ô MK); WF-3 overlay khớp zone; kéo vùng + polygon ≥3 đỉnh
+
+**Task**
+
+1. **Admin thêm user:** `POST /api/v1/users` — một trường **Mật khẩu** (bỏ `password_confirmation` / rule `confirmed`); `must_change_password: false` vì admin đặt mật khẩu trực tiếp (khác lời mời / reset MK).
+2. **Double-click sửa đỉnh — zone “nhảy” lệch so với chấm:** overlay vẽ viền bằng centroid + `left/top` không khớp cách Fabric vẽ polygon **tọa độ tuyệt đối** như `PolygonLayer` → sửa `zoneVertexOverlay`: polygon đỏ cùng hệ tọa độ với đỉnh; `objectCaching: false` cho viền/handles và **zone trong group** (`PolygonLayer`) để stroke cập nhật khi kéo.
+3. **Kéo cả vùng mà cạnh không theo:** vùng hợp lệ là **polygon đóng ≥3 đỉnh**. Chỉ **2 điểm** = đoạn thẳng, không phải miền; hành vi Fabric/render có thể lạ. Editor vẽ polygon yêu cầu **tối thiểu 3 điểm** trước double-click kết thúc; nên dùng **Hình chữ nhật** nếu chỉ cần 2 góc.
+
+**Hướng dẫn QA — WF-3 (Canvas Editor, PM/admin dự án)**
+
+- Chế độ **Chọn**; **double-click** vùng → viền đỏ + chấm **trùng** vùng đang thấy (không lệch).
+- **Kéo cả vùng:** fill + viền + label di chuyển cùng nhau; sau debounce PUT 200.
+- Sửa đỉnh: đỏ kéo, xanh double-click chèn, chuột phải xóa (≥3 đỉnh), Ctrl+Z, Lưu hình / Hủy / Esc.
+
+**Files changed (cộng dồn 2026-03-21)**
+
+| File | Thay đổi |
+|------|-----------|
+| `backend/app/Http/Requests/StoreUserRequest.php` | `password` min:8, không `confirmed` |
+| `backend/app/Services/UserService.php` | `create`: `must_change_password: false` |
+| `backend/tests/Feature/UserManagementTest.php` | POST không gửi `password_confirmation`; assert `must_change_password` false |
+| `frontend/src/pages/AdminUsers.tsx` | Một ô mật khẩu; subtitle cập nhật |
+| `frontend/src/components/canvas/zoneVertexOverlay.ts` | Polygon tuyệt đối; `objectCaching: false` |
+| `frontend/src/components/canvas/PolygonLayer.tsx` | Zone poly `objectCaching: false` |
+| (+ trước đó) `fabricZoneGeometry`, `POST /users`, … | |
+
+**Verify**
+
+- `npm run lint && npm run build` — 0 error.
+- `php artisan test --filter=UserManagementTest` (DB test migrate sạch).
+
+---
+
+### Session: 2026-03-17 — Bắt buộc đổi MK lần đầu; canvas zone kéo + sửa đỉnh (WF-3) + Undo cục bộ
+
+**Task**
+
+1. **Tài khoản mời / reset MK:** mật khẩu tạm → `must_change_password`; login + `me` trả cờ; sau đổi MK tại `/account/must-change-password` mới vào app (`BlockUntilPasswordChanged`, `GuestOnly`).
+2. **Canvas editor (PM/Admin):** kéo **cả vùng** (Fabric `Group` + `object:modified` + debounce PUT `geometry_pct`); **double-click** vùng → overlay sửa đỉnh (`zoneVertexOverlay.ts`: đỏ/xanh, chèn, chuột phải xóa, **Ctrl+Z / Ctrl+Shift+Z**, Esc hủy); thanh **Lưu hình / Hủy**; `geometryToApiPolygon` dùng chung tạo zone / cập nhật.
+3. **Undo kéo vùng:** chưa có stack riêng; **Undo/Redo** SPEC §WF-3 áp dụng cho phiên **sửa đỉnh** (overlay).
+4. **`App.tsx`:** sửa cấu trúc `<Route>` lồng (`BlockUntilPasswordChanged` → `AppShell`) để JSX hợp lệ.
+
+**Files changed**
+
+| File | Thay đổi |
+|------|-----------|
+| `backend/database/migrations/2026_03_24_000000_add_must_change_password_to_users_table.php` | Cột `must_change_password` |
+| `backend/app/Models/User.php`, `UserResource.php`, `AuthService.php`, `AuthController.php`, `ProjectMemberService.php`, `UserService.php` | Cờ + invite + reset + clear khi đổi MK |
+| `frontend/src/stores/authStore.ts` | `must_change_password` trên user |
+| `frontend/src/App.tsx` | Route must-change + guard + fix đóng tag |
+| `frontend/src/pages/Login.tsx`, `MustChangePasswordPage.tsx` | Redirect / form đổi MK |
+| `frontend/src/lib/fabricZoneGeometry.ts`, `frontend/src/components/canvas/zoneVertexOverlay.ts` | Hình học canvas + overlay chỉnh đỉnh |
+| `frontend/src/components/canvas/PolygonLayer.tsx` | Group drag, vertex edit, `FabricCanvasHandle` commit/cancel |
+| `frontend/src/pages/CanvasEditor.tsx` | `canEditZoneGeometry`, state overlay, PUT zone + UI gợi ý |
+
+**Verify**
+
+- `npm run lint && npm run build` (frontend) — 0 error.
+- `php artisan migrate` nếu chưa có cột `must_change_password`.
+
+---
+
+### Session: 2026-03-23 — AdminUsers UX + tìm kiếm; bỏ reset MK tab Thành viên; ProjectList tìm kiếm
+
+**Task**
+
+1. **ProjectDetail / tab Thành viên:** gỡ toàn bộ **đặt lại mật khẩu** (modal, cột Mật khẩu, `isPlatformAdmin`). Chức năng chỉ còn tại **`/admin/users`**.
+2. **AdminUsers:** nút **Chỉnh sửa** / **Đặt lại MK** — brand TienDo (`#FF7F29`, `#FFF3E8`, icon `Pencil` / `KeyRound`); bảng viền `#E2E8F0`.
+3. **Tìm người dùng / tìm dự án:** query **`search`** + **`per_page`** (tối đa 100) — **Controller → Service → Repository**, filter `name` **`ILIKE`** (PostgreSQL), escape `%` `_`. Frontend: **`useDebouncedValue`** 300ms gọi API.
+4. **ProjectList:** empty state khi không khớp; sau **Tạo dự án** → xóa ô tìm + merge list (refetch khi debounce về rỗng).
+
+**Files changed**
+
+| File | Thay đổi |
+|------|-----------|
+| `frontend/src/pages/ProjectDetail.tsx` | `MembersTab`: bỏ reset password |
+| `frontend/src/pages/AdminUsers.tsx` | Nút brand, search + debounce + API |
+| `frontend/src/pages/ProjectList.tsx` | Search + debounce + API; `onCreated` clear search |
+| `frontend/src/lib/useDebouncedValue.ts` | **Mới** |
+| `backend/app/Repositories/UserRepository.php` | `paginate(..., ?nameSearch)` + `ilike` |
+| `backend/app/Services/UserService.php` | Truyền `nameSearch` |
+| `backend/app/Http/Controllers/Api/UserController.php` | Query `search` (max 100 ký tự) |
+| `backend/app/Repositories/ProjectRepository.php` | `paginateForUser(..., ?nameSearch)` |
+| `backend/app/Services/ProjectService.php` | Truyền `nameSearch` |
+| `backend/app/Http/Controllers/Api/ProjectController.php` | `per_page` + `search` |
+| `backend/tests/Feature/UserManagementTest.php` | `test_admin_can_filter_users_by_name_search` |
+| `backend/tests/Feature/ProjectListSearchTest.php` | **Mới** |
+
+**Verify**
+
+- `npm run lint && npm run build` — 0 error.
+- `php artisan test` (DB `tiendo_test` migrate sạch) — feature search khi CI khả dụng.
+
+---
+
+### Session: 2026-03-23 — DB: cột `users.avatar_path` (fix upload avatar)
+
+**Task**
+
+- Lỗi khi upload avatar: PostgreSQL **`column "avatar_path" ... does not exist`** — migration **`2026_03_23_120000_add_avatar_path_to_users_table`** chưa được chạy trên DB `tiendo`.
+- Chạy `php artisan migrate` → migration **DONE**; bỏ `->after('email')` trong file migration (PostgreSQL không dùng `AFTER`; tránh nhầm lẫn khi đọc code).
+
+**Files changed**
+
+| File | Thay đổi |
+|------|-----------|
+| `backend/database/migrations/2026_03_23_120000_add_avatar_path_to_users_table.php` | Bỏ `after('email')`, ghi chú PG |
+
+**Verify / Ops**
+
+- Môi trường local/staging/production: **`php artisan migrate`** sau khi pull code có migration avatar.
+- `npm run lint && npm run build` — 0 error.
+
+---
+
+### Session: 2026-03-17 (bổ sung) — Modal mật khẩu đồng bộ Excel + sửa upload avatar
+
+**Task**
+
+- Form **Đổi mật khẩu** / **Đặt lại mật khẩu** dùng cùng “skin” modal như **Nhập Excel**: backdrop `#0F172A/55` + blur, header `F8FAFC` + gạch cam, body trong khối `rounded-xl` xám nhạt, footer `F8FAFC`, input `border #E2E8F0` + focus cam.
+- **Avatar:** sau khi chọn ảnh phải cập nhật ngay trên header — sửa **không** gửi `Content-Type: multipart/form-data` thủ công (thiếu `boundary` → Laravel không nhận file); cập nhật `user` từ JSON trả về `POST /auth/me/avatar` + query cache-bust `_v` trên URL ảnh.
+
+**Files changed**
+
+| File | Thay đổi |
+|------|-----------|
+| `frontend/src/components/ui/AppFormModal.tsx` | **Mới:** vỏ modal + `appFormInputClass` / `appFormLabelClass` |
+| `frontend/src/components/account/ChangePasswordModal.tsx` | Dùng `AppFormModal`, `parseApiError`, style Excel |
+| `frontend/src/components/account/AdminSetPasswordModal.tsx` | Dùng `AppFormModal`, style Excel |
+| `frontend/src/components/layout/AppShell.tsx` | Upload avatar: bỏ header Content-Type, `setState` từ response, `_v` cache bust |
+| `frontend/src/stores/authStore.ts` | `export type AuthUser` (dùng khi parse response avatar) |
+
+**Verify**
+
+- `npm run lint && npm run build` — 0 error.
+
+---
+
+### Session: 2026-03-17 — Avatar, đổi mật khẩu, admin đặt lại MK, nhãn role dự án
+
+**Task**
+
+- **Avatar:** mọi tài khoản upload ảnh đại diện (`POST /auth/me/avatar`); API trả `avatar_url` (`/storage/...`) trên user / thành viên dự án.
+- **Menu tài khoản (AppShell):** click avatar → **Đổi mật khẩu** (`PATCH /auth/me/password`), **Đổi ảnh đại diện**, **Đăng xuất** (desktop dropdown + mobile menu).
+- **Admin:** trang **Người dùng** — nút **Đặt lại MK** cho user **không** phải `admin` (`PATCH /users/{user}/password`); policy backend chặn reset tài khoản admin khác.
+- **Tab Thành viên (dự án):** admin hệ thống thấy cột **Mật khẩu** → **Đặt lại MK** cho thành viên không phải admin; select mời + cột role hiển thị **Field Team / Project Manager / Viewer** (API vẫn snake_case).
+- **Admin users table:** cột role hiển thị nhãn tương tự (Admin, Field Team, …); avatar nhỏ nếu có.
+
+**Files changed**
+
+| File | Thay đổi |
+|------|-----------|
+| `backend/routes/api.php` | `POST /auth/me/avatar`, `PATCH /auth/me/password`, `PATCH /users/{user}/password` |
+| `backend/app/Http/Resources/UserResource.php` | `avatar_url` |
+| `backend/app/Http/Resources/ProjectMemberResource.php` | nested `user.avatar_url` |
+| `backend/app/Http/Controllers/Api/UserController.php` | `resetPassword` |
+| `frontend/src/stores/authStore.ts` | `AuthUser.avatar_url` |
+| `frontend/src/lib/roleLabels.ts` | **Mới:** `projectMemberRoleLabel`, `platformUserRoleLabel` |
+| `frontend/src/components/account/ChangePasswordModal.tsx` | **Mới** |
+| `frontend/src/components/account/AdminSetPasswordModal.tsx` | **Mới** |
+| `frontend/src/components/layout/AppShell.tsx` | Avatar ảnh, dropdown + mobile, upload + modal đổi MK |
+| `frontend/src/pages/AdminUsers.tsx` | Avatar, nhãn role, Đặt lại MK |
+| `frontend/src/pages/ProjectDetail.tsx` | `MembersTab`: nhãn role, avatar, admin đặt lại MK |
+
+**Approach & tại sao chọn**
+
+- Avatar lưu disk `public`, URL tương đối — Vite proxy `/storage` → backend (đồng bộ với PDF/tiles).
+- Đặt lại MK admin: tái dùng `AdminSetPasswordModal`; policy `UserPolicy::resetPassword` tránh leo thang qua reset admin.
+
+**Verify**
+
+- `npm run lint && npm run build` (frontend) — 0 error.
+- Backend: chạy migration `add_avatar_path_to_users` nếu chưa (`php artisan migrate`).
+
+---
+
+### Session: 2026-03-23 — Xuất PDF bản vẽ (PM/admin + đội được giao)
+
+**Task**
+
+- **PM / admin** (`CanvasEditor`, `CanvasView`): xuất **PDF toàn layer** (tiles + zone/mark) hoặc **kéo chọn vùng** trên viewport → PDF một trang đúng tỷ lệ vùng.
+- **Đội hiện trường** (`CanvasProgress`): nút **PDF vùng giao** — ảnh ghép giữ nguyên logic **mờ** zone không được giao (`opacity` như `MarkDrawCanvas`); chỉ user có role `field_team` trên dự án (không hiện cho admin global / PM trên trang tiến độ).
+
+**Files changed**
+
+| File | Thay đổi |
+|------|-----------|
+| `frontend/package.json` | dependency **`jspdf`** |
+| `frontend/src/lib/canvasPdfExport.ts` | **Mới:** `drawTilesOnContext`, `compositeLayerToCanvas`, `downloadCanvasAsPdf`, `exportLayerPdf` |
+| `frontend/src/components/canvas/ExportMarqueeOverlay.tsx` | **Mới:** overlay kéo thả + map `getBoundingClientRect(lowerCanvas)` → pixel layer |
+| `frontend/src/components/canvas/PolygonLayer.tsx` | `forwardRef` + `FabricCanvasHandle` / `useImperativeHandle` → `getFabric()` |
+| `frontend/src/pages/CanvasEditor.tsx` | Nút PDF toàn bộ / PDF vùng chọn; marquee + `hasProjectRole` PM/admin |
+| `frontend/src/pages/CanvasView.tsx` | `ReadOnlyCanvas` `forwardRef`; PDF + marquee tương tự editor |
+| `frontend/src/pages/CanvasProgress.tsx` | `MarkDrawCanvas` `forwardRef`; nút PDF cho `field_team` |
+
+**Approach & tại sao chọn**
+
+- **Client-only:** không API mới — tải lại tile JPEG qua URL công khai (`/api/v1/layers/.../tiles/0/x/y`), vẽ lên `CanvasRenderingContext2D`, ghép **`fabric.Canvas.toDataURL`** (overlay zone/mark đúng như màn hình).
+- **Không html2canvas** trên DOM transform — tránh sai lệch zoom/pan; `jspdf` kéo theo `html2canvas` transitive (chunk build) — chấp nhận size bundle tăng.
+- **Marquee:** tọa độ màn hình → layer qua tỷ lệ với `lowerCanvasEl.getBoundingClientRect()`.
+
+**Decisions quan trọng**
+
+- Quyền: PDF đầy đủ/vùng = **`project_manager` + `admin`**; PDF “vùng được giao” = **`field_team`** trên project (admin dùng editor/view để xuất full).
+- Trang PDF một trang, `unit: 'px'`, `format: [w,h]` khớp ảnh xuất.
+
+**Đã thử / fail**
+
+- ESLint `set-state-in-effect` trên overlay khi `active` → bỏ effect reset; dùng **`key`** tăng (`pdfMarqueeKey`) mỗi lần mở marquee để remount sạch state.
+
+**Claude AI Web cần biết**
+
+- Export dùng **`polygonFabricRef` / `MarkDrawCanvas` ref** → `getFabric()`; map marquee cần **`lowerCanvasEl`** sau `useLayoutEffect` khi mở overlay.
+- Bản vẽ lớn → PDF nặng; có thể sau này giảm `multiplier` hoặc JPEG tiles + overlay PNG.
+
+**Verify**
+
+- `npm run lint && npm run build` — 0 error.
+
+---
+
 ### Session: 2026-03-22 — Tab title (`document.title`) theo route
 
 **Task**
@@ -462,3 +782,4 @@
 | fix: comments-tab-multipart-images | **TEST 7.3 + 7.4**: (1) **Thumbnail 404 / URL sai** — `GET /comments/{id}/images/{filename}` chỉ khớp **một** segment; nếu ghép `comments/2/uuid.png` vào path thì route lệch → 404 NOT_FOUND. Fix: `commentImageBasename()` lấy tên file cuối + `encodeURIComponent` cho segment; key React `c.id + img`. (2) **Chỉ ảnh → Validation failed** — gửi `FormData` với `headers: { 'Content-Type': 'multipart/form-data' }` **không có boundary** → Laravel không nhận file → chỉ lưu text / lỗi validation. Fix: **bỏ** header, để axios/browser gắn boundary. (3) **6 ảnh** — thống nhất `MAX_IMAGES_PER_COMMENT = 5`, lỗi "Tối đa 5 ảnh mỗi bình luận.", reset `files` + input khi quá 5; disable nút Gửi khi `files.length > 5`. Bonus: `ProjectDetail` Excel import + upload PDF — bỏ cùng header multipart. Lint 0 error, build 0 error. | — |
 | docs: session-log-2026-03-20-comments | **SESSION-LOG**: thêm mục **Current Session** (task TEST 7.3/7.4, files, approach, decisions, fail, context cho Claude Web); 1 dòng tóm tắt = fix comments multipart + URL basename + không set Content-Type FormData + cap 5 ảnh + sync PROJECT-STATUS. | — |
 | ux: document-title-per-route | **Tab trình duyệt theo route**: `index.html` mặc định **TienDo**; `src/lib/documentTitle.ts` — `titleForPathname()` + `DocumentTitleSync` trong `App.tsx` (`useLocation` → `document.title`: Đăng nhập / Dự án / Chi tiết dự án / Soạn bản vẽ / Tiến độ / Xem bản vẽ / Thông báo / Người dùng / Xem chia sẻ). Không dùng react-helmet; regex pathname từ cụ thể → chung. Lint 0 error. | — |
+| feat: canvas-pdf-export | **Xuất PDF bản vẽ client-side**: `jspdf` + `canvasPdfExport.ts` (tiles + `fabric.toDataURL`); `PolygonLayer`/`MarkDrawCanvas`/`ReadOnlyCanvas` ref `getFabric()`; `ExportMarqueeOverlay` chọn vùng. **CanvasEditor** + **CanvasView**: PM/admin — PDF toàn bộ + PDF vùng chọn. **CanvasProgress**: chỉ **field_team** — PDF giữ zone không giao mờ. Lint + build 0 error. | — |

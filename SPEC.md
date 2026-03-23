@@ -2,7 +2,7 @@
 
 **Ngày:** 2026-03-18
 **Trạng thái:** Dev-ready — giao cho AI coding agent
-**Stack:** Laravel 11 (PHP 8.2) + PostgreSQL 14 + React 18 (Vite) + Fabric.js 5.x + PDF.js + Tailwind CSS + shadcn/ui + Python worker (pdf2image)
+**Stack:** Laravel 11 (PHP 8.2) + PostgreSQL 14 + React 18 (Vite) + Fabric.js 5.x + Tailwind CSS + shadcn/ui + Python worker (pdf2image + ezdxf/matplotlib cho DXF/DWG)
 **Server:** Ubuntu 22.04, PHP 8.2 FPM (song song PHP 7.4 cho projects cũ), PostgreSQL 14.22
 
 ---
@@ -48,7 +48,7 @@ Huấn dùng thật trên dự án đang chạy trong 2 tuần. Dùng hàng ngà
 2. Auth: email+password (Laravel Sanctum), RBAC 2 tầng
 3. CRUD User (admin tạo, PM tạo trong scope project)
 4. CRUD Project + MasterLayer + Layer
-5. Upload PDF → Queue → Python pdf2image → image tiles
+5. Upload bản vẽ (PDF / DXF / DWG) → Queue → Python drawing_processor → image tiles
 6. Hiển thị bản vẽ: PDF.js background + Fabric.js overlay
 7. Vẽ Zone: rect/circle/polygon trên Fabric.js
 8. Zone CRUD: name, status (5), %, assignee, deadline, tasks, notes
@@ -108,14 +108,14 @@ Field team login bằng email + password tạm → đổi password lần đầu 
 ```
 PM mở project → chọn MasterLayer → click "Thêm bản vẽ"
 → Nhập: tên ("Kiến trúc"), code ("KT"), type (architecture/electrical/mechanical/plumbing/other)
-→ Chọn file PDF (≤ 50MB)
+→ Chọn file PDF, DXF hoặc DWG (≤ 50MB; DWG có thể cần xuất DXF/PDF nếu worker không đọc được)
 → API POST /master-layers/{id}/layers (multipart)
-→ Backend: validate → lưu PDF → tạo Layer record (status=processing)
+→ Backend: validate → lưu `original.{pdf|dxf|dwg}` → tạo Layer record (status=processing)
 → Dispatch ProcessPdfJob vào queue
 → Frontend: hiện "Đang xử lý..."
 
 Python worker (ProcessPdfJob):
-→ pdf2image: PDF page 1 → PNG (DPI 150) → cắt tiles 1024x1024
+→ PDF: pdf2image trang 1; DXF/DWG: ezdxf + matplotlib rasterize → cắt tiles 1024×1024 (DPI 150)
 → Thành công: Layer status=ready, lưu width_px/height_px/tile_path
 → Thất bại: retry 3 lần (backoff 30/60/120s) → status=failed + error_message
 
@@ -132,7 +132,8 @@ PM mở canvas (/projects/{id}/layers/{layerId}/editor)
   - Rect: click + drag
   - Circle: click + drag → convert thành polygon 24 cạnh
   - Polygon: click đặt điểm → double-click kết thúc (min 3 điểm)
-→ Popup nhập zone info: tên (bắt buộc), assignee, deadline, tasks, notes
+→ Popup nhập zone info: tên (bắt buộc), deadline, tasks, notes
+→ Giao cho thành viên dự án (`assigned_user_id` + nhãn hiển thị theo PATCH-07): chỉnh ở panel Chi tiết sau khi tạo (dropdown thành viên project), không nhập tên tự do ở popup tạo.
 → Save → API POST /layers/{layerId}/zones
 → Backend: validate geometry, generate zone_code, compute area → lưu
 → Log: activity_logs (action=created, snapshot_before=NULL)
@@ -1001,7 +1002,7 @@ GET    /share/{token}                        → public, no auth: project data +
   - Top: "Khu vực" count
   - Zone list: scrollable, click to select, color dot + name + % badge
   - Zone detail panel (bottom half): status dropdown, % slider, assignee, deadline, tasks, notes, delete button
-  - Tab "Lịch sử": activity timeline
+  - Tab "Lịch sử": timeline dạng **card** — avatar chữ cái, thời gian tương đối (vi), tag **Khu vực** / **Mark tiến độ**, câu mô tả sinh từ `changes` (trạng thái **A → B**, tiến độ **% → %**, deadline, nhãn phụ trách, …); PM **Hoàn tác** qua rollback. *(Backlog UI dashboard: feed “Hoạt động” cấp dự án + filter + KPI 24h như mockup thiết kế.)*
 
 **Canvas — Progress** (`/projects/{id}/layers/{layerId}/progress`)
 - Same layout nhưng:
@@ -1167,11 +1168,11 @@ KHÔNG build trong MVP:
 - [ ] CRUD Layer trong MasterLayer: tên, code, type
 - [ ] Navigation: Project list → Project detail → MasterLayer → Layer → Canvas
 
-### AC-03: Upload & Display PDF
-- [ ] Upload PDF ≤50MB → processing → ready → hiển thị trên canvas
+### AC-03: Upload & Display bản vẽ (tiles)
+- [ ] Upload PDF / DXF / DWG ≤50MB → processing → ready → hiển thị trên canvas
 - [ ] Zoom smooth (scroll wheel + buttons +/−/fit)
 - [ ] Pan (drag canvas)
-- [ ] Upload non-PDF → reject 422
+- [ ] Upload định dạng khác (không phải PDF/DXF/DWG) → reject 422
 - [ ] Upload >50MB → reject 413
 - [ ] Processing fail → retry → fail → status=failed, error message hiển thị
 
@@ -2954,6 +2955,10 @@ Khi check permission (field_team):
 Khi hiển thị trên UI:
   → Dùng assignee text (đẹp hơn, có thể customized)
   → Nếu assignee trống nhưng assigned_user_id có → hiện user.name
+
+Popup tạo zone (WF-3):
+  → Không có ô “người phụ trách” tự do — tránh nhập tên ngoài danh sách thành viên mà không gắn FK.
+  → PM chọn người giao trong panel Chi tiết (member project); backend có thể auto gán `assignee` = `user.name` khi đổi `assigned_user_id` (nếu nhãn đang trống hoặc trùng tên user cũ).
 ```
 
 **Validation:**

@@ -12,7 +12,7 @@ use RuntimeException;
 class PdfProcessingService
 {
     /**
-     * Chạy Python pdf_processor.py, parse stdout JSON.
+     * Chạy Python drawing_processor.py (PDF / DXF / DWG → tiles), parse stdout JSON.
      *
      * @return array{width_px: int, height_px: int, tiles_generated: int}
      */
@@ -22,7 +22,7 @@ class PdfProcessingService
         $inputPath = $disk->path($layer->file_path);
 
         if (! is_file($inputPath)) {
-            throw new RuntimeException('PDF file not found on disk.');
+            throw new RuntimeException('Drawing file not found on disk.');
         }
 
         $tileRelative = 'layers/'.$layer->id.'/tiles';
@@ -35,27 +35,38 @@ class PdfProcessingService
         }
 
         $python = env('PYTHON_BIN', 'python3');
-        $script = base_path('scripts/pdf_processor.py');
+        $script = base_path('scripts/drawing_processor.py');
         $tileSize = (int) env('PDF_TILE_SIZE', 1024);
         $dpi = (int) env('PDF_DPI', 150);
 
         if (! is_file($script)) {
-            throw new RuntimeException('pdf_processor.py not found at '.$script);
+            throw new RuntimeException('drawing_processor.py not found at '.$script);
         }
 
-        $result = Process::timeout(120)
-            ->run([
-                $python,
-                $script,
-                '--input',
-                $inputPath,
-                '--output-dir',
-                $outputDir,
-                '--tile-size',
-                (string) $tileSize,
-                '--dpi',
-                (string) $dpi,
-            ]);
+        $processEnv = [];
+        $odaConverter = env('TIENDO_ODA_FILE_CONVERTER');
+        if (is_string($odaConverter) && $odaConverter !== '') {
+            $processEnv['TIENDO_ODA_FILE_CONVERTER'] = $odaConverter;
+            $processEnv['ODA_FILE_CONVERTER'] = $odaConverter;
+        }
+
+        $pending = Process::timeout(120);
+        if ($processEnv !== []) {
+            $pending->env($processEnv);
+        }
+
+        $result = $pending->run([
+            $python,
+            $script,
+            '--input',
+            $inputPath,
+            '--output-dir',
+            $outputDir,
+            '--tile-size',
+            (string) $tileSize,
+            '--dpi',
+            (string) $dpi,
+        ]);
 
         $stdout = trim($result->output());
         $decoded = $this->parseStdoutJson($stdout);
@@ -63,7 +74,7 @@ class PdfProcessingService
         if (is_array($decoded) && array_key_exists('success', $decoded) && $decoded['success'] === false) {
             $message = is_string($decoded['error'] ?? null)
                 ? $decoded['error']
-                : 'PDF processing failed.';
+                : 'Drawing processing failed.';
 
             throw new RuntimeException($message);
         }

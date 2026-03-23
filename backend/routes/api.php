@@ -40,8 +40,12 @@ Route::prefix('v1')->group(function (): void {
     Route::middleware('auth:sanctum')->group(function (): void {
         Route::post('/auth/logout', [AuthController::class, 'logout']);
         Route::get('/auth/me', [AuthController::class, 'me']);
+        Route::post('/auth/me/avatar', [AuthController::class, 'uploadAvatar']);
+        Route::patch('/auth/me/password', [AuthController::class, 'changePassword']);
         Route::get('/users', [UserController::class, 'index']);
+        Route::post('/users', [UserController::class, 'store']);
         Route::put('/users/{user}', [UserController::class, 'update']);
+        Route::patch('/users/{user}/password', [UserController::class, 'resetPassword']);
         Route::post('/analytics/events', [AnalyticsController::class, 'store']);
         Route::get('/notifications', [NotificationController::class, 'index']);
         Route::get('/notifications/unread-count', [NotificationController::class, 'unreadCount']);

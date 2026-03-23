@@ -7,6 +7,7 @@ import {
 
 import client from '@/api/client'
 import { parseApiError } from '@/lib/parseApiError'
+import { projectMemberRoleLabel } from '@/lib/roleLabels'
 import useAuthStore from '@/stores/authStore'
 import useCanvasStore from '@/stores/canvasStore'
 
@@ -58,6 +59,8 @@ type MemberItem = {
     id: number
     name: string
     email: string
+    role?: 'admin' | 'project_manager' | 'field_team' | 'viewer' | null
+    avatar_url?: string | null
     is_active: boolean
   } | null
 }
@@ -230,7 +233,16 @@ function CreateMasterLayerForm({
   )
 }
 
-// ─── Upload Layer form (inline, PDF upload) ─────────────────────────────────
+const ALLOWED_DRAWING_EXTENSIONS = ['pdf', 'dxf', 'dwg'] as const
+
+function isAllowedDrawingFile(file: File): boolean {
+  const i = file.name.lastIndexOf('.')
+  if (i < 0) return false
+  const ext = file.name.slice(i + 1).toLowerCase()
+  return (ALLOWED_DRAWING_EXTENSIONS as readonly string[]).includes(ext)
+}
+
+// ─── Upload Layer form (inline: PDF / DXF / DWG) ───────────────────────────
 
 function UploadLayerForm({
   masterLayerId,
@@ -252,8 +264,11 @@ function UploadLayerForm({
 
   const submit = async () => {
     if (!name.trim() || !code.trim()) { setErr('Tên và mã là bắt buộc.'); return }
-    if (!file) { setErr('Vui lòng chọn file PDF.'); return }
-    if (file.type !== 'application/pdf') { setErr('Chỉ chấp nhận file PDF.'); return }
+    if (!file) { setErr('Vui lòng chọn file bản vẽ.'); return }
+    if (!isAllowedDrawingFile(file)) {
+      setErr('Chỉ chấp nhận PDF, DXF hoặc DWG (xuất từ AutoCAD hoặc tương đương).')
+      return
+    }
     if (file.size > 50 * 1024 * 1024) { setErr('File tối đa 50MB.'); return }
 
     setErr(null)
@@ -272,7 +287,7 @@ function UploadLayerForm({
 
   return (
     <div className="rounded-lg border border-dashed bg-muted/20 p-4">
-      <p className="mb-3 text-sm font-semibold">Thêm bản vẽ (upload PDF)</p>
+      <p className="mb-3 text-sm font-semibold">Thêm bản vẽ (PDF, DXF, DWG)</p>
       <div className="grid gap-2 sm:grid-cols-2">
         <input
           className="rounded-md border bg-background px-3 py-2 text-sm"
@@ -299,7 +314,7 @@ function UploadLayerForm({
           <input
             ref={fileRef}
             type="file"
-            accept=".pdf,application/pdf"
+            accept=".pdf,.dxf,.dwg,application/pdf,image/vnd.dwg,application/acad,application/x-dwg"
             className="hidden"
             onChange={(e) => setFile(e.target.files?.[0] ?? null)}
           />
@@ -311,7 +326,7 @@ function UploadLayerForm({
             {file ? (
               <span className="text-foreground">{file.name}</span>
             ) : (
-              <span className="text-muted-foreground">Chọn file PDF (≤ 50MB)...</span>
+              <span className="text-muted-foreground">Chọn PDF / DXF / DWG (≤ 50MB)...</span>
             )}
           </button>
         </div>
@@ -653,9 +668,9 @@ function MembersTab({
               value={role}
               onChange={(e) => setRole(e.target.value as typeof role)}
             >
-              <option value="field_team">field_team</option>
-              <option value="viewer">viewer</option>
-              {projectRole === 'admin' ? <option value="project_manager">project_manager</option> : null}
+              <option value="field_team">Field Team</option>
+              <option value="viewer">Viewer</option>
+              {projectRole === 'admin' ? <option value="project_manager">Project Manager</option> : null}
             </select>
             <button
               type="button"
@@ -706,9 +721,20 @@ function MembersTab({
                 const canRemove = canManageMembers && memberUserId !== null && memberUserId !== currentUserId
                 return (
                   <tr key={member.id} className="border-t">
-                    <td className="px-3 py-2">{member.user?.name ?? '—'}</td>
+                    <td className="px-3 py-2">
+                      <div className="flex items-center gap-2">
+                        {member.user?.avatar_url ? (
+                          <img
+                            src={member.user.avatar_url}
+                            alt=""
+                            className="h-8 w-8 shrink-0 rounded-full object-cover ring-1 ring-border"
+                          />
+                        ) : null}
+                        <span>{member.user?.name ?? '—'}</span>
+                      </div>
+                    </td>
                     <td className="px-3 py-2">{member.user?.email ?? '—'}</td>
-                    <td className="px-3 py-2">{member.role}</td>
+                    <td className="px-3 py-2">{projectMemberRoleLabel(member.role)}</td>
                     <td className="px-3 py-2">
                       {member.user?.is_active === false ? (
                         <span className="text-red-600">inactive</span>

@@ -20,13 +20,21 @@ class ProjectMemberResource extends JsonResource
             'user_id' => $this->user_id,
             'role' => $this->role,
             'created_at' => $this->created_at?->toISOString(),
-            'user' => $this->whenLoaded('user', fn () => [
-                'id' => $this->user->id,
-                'name' => $this->user->name,
-                'email' => $this->user->email,
-                'role' => $this->user->role,
-                'is_active' => $this->user->is_active,
-            ]),
+            'user' => $this->whenLoaded('user', function () {
+                $avatarUrl = null;
+                if (! empty($this->user->avatar_path)) {
+                    $avatarUrl = '/storage/'.$this->user->avatar_path;
+                }
+
+                return [
+                    'id' => $this->user->id,
+                    'name' => $this->user->name,
+                    'email' => $this->user->email,
+                    'role' => $this->user->role,
+                    'avatar_url' => $avatarUrl,
+                    'is_active' => $this->user->is_active,
+                ];
+            }),
         ];
     }
 }

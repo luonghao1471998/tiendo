@@ -1,12 +1,18 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react'
 import { fabric } from 'fabric'
+import { FileDown } from 'lucide-react'
 import { Link, useParams } from 'react-router-dom'
 
 import client from '@/api/client'
 import CanvasWrapper from '@/components/canvas/CanvasWrapper'
+import ExportMarqueeOverlay from '@/components/canvas/ExportMarqueeOverlay'
+import type { FabricCanvasHandle } from '@/components/canvas/PolygonLayer'
 import TileLayer from '@/components/canvas/TileLayer'
 import ZoomControls from '@/components/canvas/ZoomControls'
+import { exportLayerPdf, type PdfCropRect } from '@/lib/canvasPdfExport'
+import useAuthStore from '@/stores/authStore'
 import { ZONE_STATUS, ZONE_STATUS_COLOR, MARK_STATUS_COLOR } from '@/lib/constants'
+import { resolveZoneAssigneeDisplay } from '@/lib/zoneAssigneeDisplay'
 import type { Zone, Geometry } from '@/stores/canvasStore'
 import useCanvasStore from '@/stores/canvasStore'
 
@@ -76,8 +82,19 @@ function hexWithAlpha(hex: string, alpha: number): string {
 
 // ─── ZoneInfoPopup (read-only) ─────────────────────────────────────────────
 
-function ZoneInfoPopup({ zone, onClose }: { zone: Zone; onClose: () => void }) {
+type ViewMember = { user: { id: number; name: string; email: string }; role: string }
+
+function ZoneInfoPopup({
+  zone,
+  onClose,
+  members,
+}: {
+  zone: Zone
+  onClose: () => void
+  members: ViewMember[]
+}) {
   const color = ZONE_STATUS_COLOR[zone.status] ?? '#9CA3AF'
+  const assigneeLine = resolveZoneAssigneeDisplay(zone, members)
   return (
     <div className="w-64 rounded-xl border bg-card shadow-xl">
       <div className="flex items-center justify-between rounded-t-xl bg-muted/60 px-4 py-2">
@@ -107,12 +124,12 @@ function ZoneInfoPopup({ zone, onClose }: { zone: Zone; onClose: () => void }) {
           <span className="text-muted-foreground">Tiến độ</span>
           <span className="font-bold">{zone.completion_pct}%</span>
         </div>
-        {zone.assignee ? (
-          <div className="flex items-center justify-between">
-            <span className="text-muted-foreground">Được giao</span>
-            <span>{zone.assignee}</span>
-          </div>
-        ) : null}
+        <div className="flex items-center justify-between">
+          <span className="text-muted-foreground">Giao cho</span>
+          <span className={assigneeLine ? '' : 'text-muted-foreground'}>
+            {assigneeLine || 'Chưa giao'}
+          </span>
+        </div>
         {zone.deadline ? (
           <div className="flex items-center justify-between">
             <span className="text-muted-foreground">Deadline</span>
@@ -146,9 +163,16 @@ interface ReadOnlyCanvasProps {
   onZoneClick: (zone: Zone, x: number, y: number) => void
 }
 
-function ReadOnlyCanvas({ widthPx, heightPx, filterStatus, onZoneClick }: ReadOnlyCanvasProps) {
+const ReadOnlyCanvas = forwardRef<FabricCanvasHandle, ReadOnlyCanvasProps>(function ReadOnlyCanvas(
+  { widthPx, heightPx, filterStatus, onZoneClick },
+  ref,
+) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const fabricRef = useRef<fabric.Canvas | null>(null)
+
+  useImperativeHandle(ref, () => ({
+    getFabric: () => fabricRef.current,
+  }))
   const zones = useCanvasStore((s) => s.zones)
   const marks = useCanvasStore((s) => s.marks)
 
@@ -240,7 +264,7 @@ function ReadOnlyCanvas({ widthPx, heightPx, filterStatus, onZoneClick }: ReadOn
       style={{ position: 'absolute', inset: 0 }}
     />
   )
-}
+})
 
 // ─── StatsBar ──────────────────────────────────────────────────────────────
 
@@ -275,14 +299,21 @@ function StatsBar({ zones }: { zones: Zone[] }) {
 
 export default function CanvasView() {
   const { id: projectId, layerId } = useParams<{ id: string; layerId: string }>()
+  const { hasProjectRole } = useAuthStore()
+  const fabricRef = useRef<FabricCanvasHandle>(null)
 
   const [layer, setLayer] = useState<LayerInfo | null>(null)
   const [layerError, setLayerError] = useState<string | null>(null)
   const [exporting, setExporting] = useState(false)
+  const [pdfMarquee, setPdfMarquee] = useState(false)
+  const [pdfBusy, setPdfBusy] = useState(false)
+  const [pdfMapEl, setPdfMapEl] = useState<HTMLElement | null>(null)
+  const [pdfMarqueeKey, setPdfMarqueeKey] = useState(0)
 
   const [filterStatus, setFilterStatus] = useState<string | null>(null)
   const [zonePopup, setZonePopup] = useState<{ zone: Zone; x: number; y: number } | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [projectMembers, setProjectMembers] = useState<ViewMember[]>([])
 
   // Stable reference — prevents ReadOnlyCanvas init effect from re-running on every render
   const handleZoneClick = useCallback((zone: Zone, x: number, y: number) => {
@@ -295,6 +326,7 @@ export default function CanvasView() {
 
   const layerIdNum = Number(layerId)
   const projectIdNum = Number(projectId)
+  const canExportPdf = hasProjectRole(projectIdNum, ['project_manager', 'admin'])
 
   useEffect(() => {
     if (!layerIdNum) return
@@ -311,6 +343,21 @@ export default function CanvasView() {
     void load()
     void fetchZonesAndMarks(layerIdNum)
   }, [layerIdNum, fetchZonesAndMarks, reset])
+
+  useEffect(() => {
+    if (!projectIdNum) return
+    const loadMembers = async () => {
+      try {
+        const resp = (await client.get(`/projects/${projectIdNum}/members`)) as {
+          data: ApiResponse<ViewMember[]>
+        }
+        setProjectMembers(resp.data.data ?? [])
+      } catch {
+        setProjectMembers([])
+      }
+    }
+    void loadMembers()
+  }, [projectIdNum])
 
   useEffect(() => {
     if (!layerIdNum) return
@@ -345,6 +392,31 @@ export default function CanvasView() {
   const widthPx = layer?.width_px ?? 2480
   const heightPx = layer?.height_px ?? 3508
 
+  useLayoutEffect(() => {
+    if (!pdfMarquee) {
+      setPdfMapEl(null)
+      return
+    }
+    const fc = fabricRef.current?.getFabric()
+    const el = (fc as unknown as { lowerCanvasEl?: HTMLElement })?.lowerCanvasEl ?? null
+    setPdfMapEl(el)
+  }, [pdfMarquee, layerReady, widthPx, heightPx])
+
+  const runLayerPdf = async (crop?: PdfCropRect) => {
+    const fc = fabricRef.current?.getFabric() ?? null
+    setPdfBusy(true)
+    try {
+      const name =
+        crop != null ? `layer_${layerIdNum}_vung_chon.pdf` : `layer_${layerIdNum}_toan_bo.pdf`
+      await exportLayerPdf(layerIdNum, widthPx, heightPx, fc, name, crop)
+    } catch (err) {
+      alert(parseApiError(err, 'Xuất PDF thất bại.'))
+    } finally {
+      setPdfBusy(false)
+      setPdfMarquee(false)
+    }
+  }
+
   if (layerError) {
     return (
       <div className="flex h-full items-center justify-center">
@@ -368,7 +440,32 @@ export default function CanvasView() {
         <span className="rounded-full bg-sky-100 px-2 py-0.5 text-xs font-medium text-sky-700 shrink-0">
           Chỉ xem
         </span>
-        <div className="ml-auto flex items-center gap-2 shrink-0">
+        <div className="ml-auto flex flex-wrap items-center justify-end gap-2 shrink-0">
+          {canExportPdf && layerReady ? (
+            <>
+              <button
+                type="button"
+                disabled={pdfBusy || pdfMarquee}
+                onClick={() => void runLayerPdf()}
+                className="hidden items-center gap-1 rounded-lg border border-[#FF7F29]/50 bg-[#FFF3E8] px-2.5 py-1.5 text-xs font-medium text-[#C2410C] hover:bg-[#FFEDD5] disabled:opacity-50 sm:inline-flex"
+              >
+                <FileDown className="h-3.5 w-3.5" />
+                {pdfBusy && !pdfMarquee ? 'PDF…' : 'PDF toàn bộ'}
+              </button>
+              <button
+                type="button"
+                disabled={pdfBusy}
+                onClick={() => {
+                  setPdfMarqueeKey((k) => k + 1)
+                  setPdfMarquee(true)
+                }}
+                className="hidden items-center gap-1 rounded-lg border bg-white px-2.5 py-1.5 text-xs font-medium text-[#64748B] hover:bg-muted disabled:opacity-50 sm:inline-flex"
+              >
+                <FileDown className="h-3.5 w-3.5" />
+                PDF vùng chọn
+              </button>
+            </>
+          ) : null}
           <button
             type="button"
             onClick={() => void handleExport()}
@@ -398,6 +495,7 @@ export default function CanvasView() {
             <CanvasWrapper widthPx={widthPx} heightPx={heightPx}>
               <TileLayer layerId={layerIdNum} widthPx={widthPx} heightPx={heightPx} />
               <ReadOnlyCanvas
+                ref={fabricRef}
                 widthPx={widthPx}
                 heightPx={heightPx}
                 filterStatus={filterStatus}
@@ -410,6 +508,18 @@ export default function CanvasView() {
             </div>
           )}
 
+          {pdfMarquee && layerReady ? (
+            <ExportMarqueeOverlay
+              key={pdfMarqueeKey}
+              active={pdfMarquee}
+              widthPx={widthPx}
+              heightPx={heightPx}
+              mapTargetEl={pdfMapEl}
+              onCancel={() => setPdfMarquee(false)}
+              onComplete={(crop) => void runLayerPdf(crop)}
+            />
+          ) : null}
+
           {/* ZoneInfoPopup */}
           {zonePopup ? (
             <div
@@ -419,7 +529,11 @@ export default function CanvasView() {
                 left: Math.min(zonePopup.x + 8, window.innerWidth - 280),
               }}
             >
-              <ZoneInfoPopup zone={zonePopup.zone} onClose={() => setZonePopup(null)} />
+              <ZoneInfoPopup
+                zone={zonePopup.zone}
+                members={projectMembers}
+                onClose={() => setZonePopup(null)}
+              />
             </div>
           ) : null}
 

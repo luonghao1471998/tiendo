@@ -18,11 +18,15 @@ type UserProject = {
   role: 'project_manager' | 'field_team' | 'viewer'
 }
 
-type AuthUser = {
+export type AuthUser = {
   id: number
   name: string
   email: string
   role: 'admin' | 'project_manager' | 'field_team' | 'viewer' | null
+  /** Đường dẫn tương đối `/storage/...` từ API */
+  avatar_url?: string | null
+  /** User mới từ lời mời (mật khẩu tạm) — bắt buộc đổi trước khi dùng app */
+  must_change_password?: boolean
   projects: UserProject[]
 }
 
